@@ -7,7 +7,4 @@ pytz>=2023.3
 requests>=2.31.0
 yfinance>=0.2.20
 python-dotenv==1.1.1
-
-# Testing dependencies
-pytest==8.4.1
-moto>=4.2.0
+aws-lambda-powertools>=2.0.0

@@ -1,31 +1,41 @@
 import datetime
-from typing import List, Dict
+from typing import Any, Dict, List, TypedDict
 
 import pandas as pd
 import yfinance as yf
+from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from src.line_notifier import LineMessagingNotifier
 
 
-def lambda_handler(event, context):
-    targets = ['VT', 'VOO', 'QQQ']
-    all_data = yf.download(targets, period='1mo', group_by='ticker', auto_adjust=True)
+class TickerData(TypedDict):
+    name: str
+    daily_change: float
+    weekly_change: float
+    current_price: float
+
+
+def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
+    targets = ["VT", "VOO", "QQQ"]
+    all_data = yf.download(targets, period="1mo", group_by="ticker", auto_adjust=True)
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
-    if all_data.index[-1].date() != datetime.datetime.now().date() - datetime.timedelta(days=1):
+    if all_data.index[-1].date() != datetime.datetime.now().date() - datetime.timedelta(
+        days=1
+    ):
         return {
-            'statusCode': 200,
-            'body': {
-                'notification_sent': False,
-                'ticker_count': 0,
-                'message': 'Market is closed today'
-            }
+            "statusCode": 200,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": 0,
+                "message": "Market is closed today",
+            },
         }
 
     # 各ティッカーのデータを個別の変数に格納
-    vt_data = all_data['VT']
-    voo_data = all_data['VOO']
-    qqq_data = all_data['QQQ']
+    vt_data: pd.DataFrame = all_data["VT"]
+    voo_data: pd.DataFrame = all_data["VOO"]
+    qqq_data: pd.DataFrame = all_data["QQQ"]
 
     # 前日との計算
     vt_daily_change = _calculate_daily_change(vt_data)
@@ -42,25 +52,25 @@ def lambda_handler(event, context):
     # DAILY_THRESHOLD = -2.0
     # WEEKLY_THRESHOLD = -5.0
 
-    ticker_data_for_check = [
+    ticker_data_for_check: List[TickerData] = [
         {
-            'name': 'VT',
-            'daily_change': vt_daily_change,
-            'weekly_change': vt_1wk_change,
-            'current_price': vt_data['Close'].iloc[-1]
+            "name": "VT",
+            "daily_change": vt_daily_change,
+            "weekly_change": vt_1wk_change,
+            "current_price": vt_data["Close"].iloc[-1],
         },
         {
-            'name': 'VOO',
-            'daily_change': voo_daily_change,
-            'weekly_change': voo_1wk_change,
-            'current_price': voo_data['Close'].iloc[-1]
+            "name": "VOO",
+            "daily_change": voo_daily_change,
+            "weekly_change": voo_1wk_change,
+            "current_price": voo_data["Close"].iloc[-1],
         },
         {
-            'name': 'QQQ',
-            'daily_change': qqq_daily_change,
-            'weekly_change': qqq_1wk_change,
-            'current_price': qqq_data['Close'].iloc[-1]
-        }
+            "name": "QQQ",
+            "daily_change": qqq_daily_change,
+            "weekly_change": qqq_1wk_change,
+            "current_price": qqq_data["Close"].iloc[-1],
+        },
     ]
 
     # TODO パイロット用にコメントアウトしたけど、便利だしこのままでいいかも。
@@ -79,12 +89,12 @@ def lambda_handler(event, context):
 
     # Lambda用のレスポンス
     return {
-        'statusCode': 200,
-        'body': {
-            'notification_sent': notification_needed,
-            'ticker_count': len(ticker_data_for_check),
-            'message': 'Stock monitoring completed successfully'
-        }
+        "statusCode": 200,
+        "body": {
+            "notification_sent": notification_needed,
+            "ticker_count": len(ticker_data_for_check),
+            "message": "Stock monitoring completed successfully",
+        },
     }
 
 
@@ -92,7 +102,7 @@ def _is_below_threshold(change: float, threshold: float) -> bool:
     return change <= threshold
 
 
-def _calculate_daily_change(stock_data: pd.DataFrame):
+def _calculate_daily_change(stock_data: pd.DataFrame) -> float:
     """
     前日比の変動率を計算
 
@@ -102,13 +112,13 @@ def _calculate_daily_change(stock_data: pd.DataFrame):
     Returns:
         float: 前日比変動率（%、小数点以下2桁）
     """
-    latest = stock_data['Close'].iloc[-1]
-    previous = stock_data['Close'].iloc[-2]
-    change = ((latest - previous) / previous) * 100
+    latest = stock_data["Close"].iloc[-1]
+    previous = stock_data["Close"].iloc[-2]
+    change: float = ((latest - previous) / previous) * 100
     return round(change, 2)
 
 
-def _calculate_weekly_change(stock_data: pd.DataFrame):
+def _calculate_weekly_change(stock_data: pd.DataFrame) -> float:
     """
     1週間前比の変動率を計算
 
@@ -118,16 +128,16 @@ def _calculate_weekly_change(stock_data: pd.DataFrame):
     Returns:
         float: 変動率（%）
     """
-    oldest_price = stock_data['Close'].iloc[-5]
-    current_price = stock_data['Close'].iloc[-1]
-    change_pct = ((current_price - oldest_price) / oldest_price) * 100
+    oldest_price = stock_data["Close"].iloc[-5]
+    current_price = stock_data["Close"].iloc[-1]
+    change_pct: float = ((current_price - oldest_price) / oldest_price) * 100
     return round(change_pct, 2)
 
 
 def _check_and_notify_all_tickers(
-        ticker_data_list: List[Dict[str, float]],
-        daily_threshold: float,
-        weekly_threshold: float
+    ticker_data_list: List[TickerData],
+    daily_threshold: float,
+    weekly_threshold: float,
 ) -> bool:
     """
     Args:
@@ -135,21 +145,20 @@ def _check_and_notify_all_tickers(
             [{'name': str, 'daily_change': float, 'weekly_change': float, 'current_price': float}, ...]
         daily_threshold (float): 日次変動の閾値
         weekly_threshold (float): 週次変動の閾値
-    
+
     Returns:
         bool: 通知が必要かどうか（1つでも閾値を下回っていればTrue）
     """
     # 各ティッカーの閾値判定
     return any(
-        _is_below_threshold(ticker['daily_change'], daily_threshold) or
-        _is_below_threshold(ticker['weekly_change'], weekly_threshold)
+        _is_below_threshold(ticker["daily_change"], daily_threshold)
+        or _is_below_threshold(ticker["weekly_change"], weekly_threshold)
         for ticker in ticker_data_list
     )
 
 
 def _format_notification_message(
-        latest_date: str,
-        ticker_data_list: List[Dict[str, float]]
+    latest_date: datetime.date, ticker_data_list: List[TickerData]
 ) -> str:
     """
     LINE通知用のメッセージを整形
@@ -174,4 +183,4 @@ def _format_notification_message(
 
 # スクリプトとして実行された場合のみメイン処理を実行
 if __name__ == "__main__":
-    lambda_handler(None, None)
+    lambda_handler({}, LambdaContext())
