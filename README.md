@@ -21,7 +21,7 @@
 ### 概要
 
 VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、日々の価格変動をテキストでLINEに通知します。  
-さらに、VTの3ヶ月株価チャートを画像で送信する機能も備えています。
+さらに、VTの6ヶ月株価チャートを画像で送信する機能も備えています。
 
 ### アーキテクチャ
 
@@ -49,7 +49,7 @@ AWS Lambda
    yfinanceを使用してETF価格とUSD/JPY為替レートを取得
 
 3. **チャート生成**  
-   matplotlibでVTの3ヶ月チャートを生成し、`/tmp/vt_chart.png`に保存
+   matplotlibでVTの6ヶ月チャートを生成し、`/tmp/vt_chart.png`に保存
 
 4. **S3アップロード**  
    boto3を使用してチャート画像をS3にアップロード
@@ -132,7 +132,7 @@ USD/JPY: 150.25
 
 #### 画像通知
 
-VTの3ヶ月株価チャートが画像として送信されます。
+VTの6ヶ月株価チャートが画像として送信されます。
 
 ![vt_chart.png](docs/vt_chart.png)
 
@@ -218,7 +218,7 @@ AWS Lambda
    Retrieves ETF prices and the USD/JPY exchange rate using yfinance.
 
 3. **Chart Generation**
-   Generates a 3-month price chart for VT using matplotlib and saves it to `/tmp/vt_chart.png`.
+   Generates a 6-month price chart for VT using matplotlib and saves it to `/tmp/vt_chart.png`.
 
 4. **S3 Upload**
    Uploads the chart image to Amazon S3 using boto3.
@@ -299,7 +299,7 @@ Week-over-Week Change: -15.3%
 
 #### Image Notification
 
-A 3-month price chart for VT is sent as an image.
+A 6-month price chart for VT is sent as an image.
 
 ![vt\_chart.png](docs/vt_chart.png)
 
