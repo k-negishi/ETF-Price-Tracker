@@ -61,6 +61,7 @@ class LineMessagingNotifier:
 
         # API設定
         self.api_url = "https://api.line.me/v2/bot/message/push"
+        self.upload_api_url = "https://api-data.line.me/v2/bot/message/upload"
         self.timeout = 10  # タイムアウト設定（秒）
 
         # ヘッダー設定
@@ -95,3 +96,49 @@ class LineMessagingNotifier:
             raise Exception(
                 f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
             )
+
+    @retry_notification(max_retries=3, delay=10)
+    def send_image_file(self, filepath: str) -> Dict[str, Any]:
+        """
+        画像ファイルをLINEにアップロードして送信
+
+        Args:
+            filepath (str): 画像ファイルのパス
+
+        Returns:
+            dict: API レスポンス
+        """
+        # 1. 画像をLINEにアップロードして contentId を取得
+        upload_headers = {
+            "Authorization": f"Bearer {self.channel_access_token}",
+            "Content-Type": "image/png",
+        }
+        with open(filepath, "rb") as f:
+            upload_response = requests.post(
+                self.upload_api_url,
+                headers=upload_headers,
+                data=f,
+                timeout=self.timeout,
+            )
+        upload_response.raise_for_status()
+        content_id = upload_response.json()["contentId"]
+
+        # 2. contentId を使って画像メッセージを送信
+        content_url = f"content://{content_id}"
+        payload = {
+            "to": self.user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": content_url,
+                    "previewImageUrl": content_url,
+                }
+            ],
+        }
+
+        push_response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        )
+        push_response.raise_for_status()
+
+        return {"status": "success"}

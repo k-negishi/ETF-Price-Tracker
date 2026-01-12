@@ -8,3 +8,4 @@ requests>=2.31.0
 yfinance>=0.2.20
 python-dotenv==1.1.1
 aws-lambda-powertools>=2.0.0
+matplotlib>=3.7.0

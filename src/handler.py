@@ -1,6 +1,8 @@
 import datetime
 from typing import Any, Dict, List, TypedDict
 
+import matplotlib.dates as mdates
+import matplotlib.pyplot as plt
 import pandas as pd
 import yfinance as yf
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -92,6 +94,11 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             latest_date, ticker_data_for_check, usd_jpy_rate
         )
         line_notifier.send_message(message)
+
+        # VTの3ヶ月グラフを生成して送信
+        vt_df_3mo = yf.download("VT", period="3mo", auto_adjust=True)
+        chart_filepath = create_vt_3month_chart(vt_df_3mo)
+        line_notifier.send_image_file(chart_filepath)
 
     # Lambda用のレスポンス
     return {
@@ -191,6 +198,35 @@ def _format_notification_message(
     alert_message += f"【為替】\n"
     alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
+
+
+def create_vt_3month_chart(df: pd.DataFrame) -> str:
+    """
+    VTの過去3ヶ月の株価チャートを生成してファイルに保存
+
+    Args:
+        df (pd.DataFrame): VTの株価データ
+
+    Returns:
+        str: 保存された画像ファイルのパス
+    """
+    fig, ax = plt.subplots(figsize=(12, 6))
+    ax.plot(df.index, df["Close"], color="#ff9900", linewidth=2)
+
+    # グラフのスタイル設定
+    ax.set_title("VT - Last 3 Months", fontsize=16)
+    ax.set_facecolor("white")
+    fig.set_facecolor("white")
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    plt.xticks(rotation=45)
+    plt.grid(True, linestyle="--", alpha=0.6)
+
+    # ファイルに保存
+    filepath = "/tmp/vt_3months.png"
+    plt.savefig(filepath, bbox_inches="tight")
+    plt.close(fig)
+
+    return filepath
 
 
 # スクリプトとして実行された場合のみメイン処理を実行
