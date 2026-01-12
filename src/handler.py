@@ -33,9 +33,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     print(all_data)
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
-    if all_data.index[-1].date() != datetime.datetime.now().date() - datetime.timedelta(
-        days=1
-    ):
+    if _is_market_closed(all_data):
         return {
             "statusCode": 200,
             "body": {
@@ -141,6 +139,21 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             "message": "Stock monitoring completed successfully",
         },
     }
+
+
+def _is_market_closed(all_data: pd.DataFrame) -> bool:
+    """
+    米国市場が休場していたかどうかを判定
+
+    Args:
+        all_data (pd.DataFrame): ダウンロードした株価データ
+
+    Returns:
+        bool: 市場が休場していたからTrue、そうでなければFalse
+    """
+    latest_date = all_data.index[-1].date()
+    expected_date = datetime.datetime.now().date() - datetime.timedelta(days=1)
+    return latest_date != expected_date
 
 
 def _is_below_threshold(change: float, threshold: float) -> bool:
