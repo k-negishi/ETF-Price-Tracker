@@ -193,44 +193,50 @@ class TestCheckAndNotifyAllTickers:
 
 class TestFormatNotificationMessage:
     """format_notification_message関数のテストクラス"""
+
     def test_format_notification_message_multiple_tickers(self):
         """複数銘柄のメッセージフォーマットテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -2.5,
-                'weekly_change': -4.2,
-                'current_price': 98.75
+                "name": "VT",
+                "daily_change": -2.5,
+                "weekly_change": -4.2,
+                "current_price": 98.75,
             },
             {
-                'name': 'VOO',
-                'daily_change': -1.8,
-                'weekly_change': -3.1,
-                'current_price': 385.20
+                "name": "VOO",
+                "daily_change": -1.8,
+                "weekly_change": -3.1,
+                "current_price": 385.20,
             },
             {
-                'name': 'QQQ',
-                'daily_change': 0.5,
-                'weekly_change': -1.2,
-                'current_price': 350.45
-            }
+                "name": "QQQ",
+                "daily_change": 0.5,
+                "weekly_change": -1.2,
+                "current_price": 350.45,
+            },
         ]
 
-        date = '2025-01-01'
-        result = _format_notification_message(date, ticker_data)
-        expected = ("📈ETF Price Tracker 2025-01-01\n\n"
-                    "【VT】\n"
-                    "現在値: $98.75\n"
-                    "前日比: -2.5%\n"
-                    "前週比: -4.2%\n\n"
-                    "【VOO】\n"
-                    "現在値: $385.20\n"
-                    "前日比: -1.8%\n"
-                    "前週比: -3.1%\n\n"
-                    "【QQQ】\n"
-                    "現在値: $350.45\n"
-                    "前日比: 0.5%\n"
-                    "前週比: -1.2%")
+        date = "2025-01-01"
+        usd_jpy_rate = 150.25
+        result = _format_notification_message(date, ticker_data, usd_jpy_rate)
+        expected = (
+            "📈ETF Price Tracker 2025-01-01\n\n"
+            "【VT】\n"
+            "現在値: $98.75\n"
+            "前日比: -2.5%\n"
+            "前週比: -4.2%\n\n"
+            "【VOO】\n"
+            "現在値: $385.20\n"
+            "前日比: -1.8%\n"
+            "前週比: -3.1%\n\n"
+            "【QQQ】\n"
+            "現在値: $350.45\n"
+            "前日比: 0.5%\n"
+            "前週比: -1.2%\n\n"
+            "【為替】\n"
+            "USD/JPY: 150.25"
+        )
 
         assert result == expected
 

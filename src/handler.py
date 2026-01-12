@@ -16,7 +16,7 @@ class TickerData(TypedDict):
 
 
 def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
-    targets = ["VT", "VOO", "QQQ"]
+    targets = ["VT", "VOO", "QQQ", "JPY=X"]
     all_data = yf.download(targets, period="1mo", group_by="ticker", auto_adjust=True)
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
@@ -84,7 +84,13 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         # vt のデータを使って日付を取得
         latest_date = vt_data.index[-1].date()
 
-        message = _format_notification_message(latest_date, ticker_data_for_check)
+        # JPY=X のデータを取得
+        jpy_data: pd.DataFrame = all_data["JPY=X"]
+        usd_jpy_rate = jpy_data["Close"].iloc[-1]
+
+        message = _format_notification_message(
+            latest_date, ticker_data_for_check, usd_jpy_rate
+        )
         line_notifier.send_message(message)
 
     # Lambda用のレスポンス
@@ -158,7 +164,9 @@ def _check_and_notify_all_tickers(
 
 
 def _format_notification_message(
-    latest_date: datetime.date, ticker_data_list: List[TickerData]
+    latest_date: datetime.date,
+    ticker_data_list: List[TickerData],
+    usd_jpy_rate: float,
 ) -> str:
     """
     LINE通知用のメッセージを整形
@@ -167,6 +175,7 @@ def _format_notification_message(
         latest_date: 最新の日付
         ticker_data_list (List[Dict[str, float]]): ティッカーデータのリスト
             [{'name': str, 'daily_change': float, 'weekly_change': float, 'current_price': float}, ...]
+        usd_jpy_rate (float): USD/JPY為替レート
 
       Returns:
         str: 整形されたメッセージ文字列
@@ -178,6 +187,9 @@ def _format_notification_message(
         alert_message += f"現在値: ${ticker['current_price']:.2f}\n"
         alert_message += f"前日比: {ticker['daily_change']}%\n"
         alert_message += f"前週比: {ticker['weekly_change']}%\n\n"
+
+    alert_message += f"【為替】\n"
+    alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
 
 
