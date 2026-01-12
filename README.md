@@ -20,7 +20,7 @@
 
 ### 概要
 
-VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、設定した割合よりも下落した場合にLINE通知する AWS Lambda ベースのアプリケーションです。
+VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、日々の価格変動をテキストでLINEに通知します。さらに、VTの3ヶ月株価チャートを画像で送信する機能も備えています。
 
 ### 使用技術
 - AWS Lambda
@@ -28,6 +28,7 @@ VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、設�
 - AWS EventBridge
 - AWS SAM
 - yfinance
+- matplotlib
 - LINE Messaging API
 
 ### 監視対象ETF
@@ -39,6 +40,7 @@ VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、設�
 | QQQ | インベスコQQQトラスト | NASDAQ100指数 |
 
 ### LINE 通知メッセージの例
+#### テキスト通知
 例1:
 ```
 📈ETF Price Tracker 2025-04-03
@@ -82,6 +84,10 @@ USD/JPY: 150.25
 前週比: -15.3%
 ```
 
+#### 画像通知
+VTの3ヶ月株価チャートが画像として送信されます。
+（画像サンプルの表示は省略）
+
 ### 環境構築手順
 
 #### Python仮想環境の作成
@@ -120,7 +126,7 @@ GitHub Actions と AWS SAM を使用したサーバーレスアプリケーシ�
 
 ### Overview
 
-An AWS Lambda–based system that automatically monitors the stock prices of popular ETFs such as VT, VOO, and QQQ, along with the USD/JPY exchange rate, and sends LINE notifications when the prices fall below predefined thresholds.
+An AWS Lambda-based application that monitors the prices of popular ETFs (VT, VOO, QQQ) and the USD/JPY exchange rate, sending daily price change notifications via LINE text message. It also includes a feature to send a 3-month stock price chart for VT as an image.
 
 ### Technologies Used
 - AWS Lambda
@@ -128,6 +134,7 @@ An AWS Lambda–based system that automatically monitors the stock prices of pop
 - AWS EventBridge
 - AWS SAM
 - yfinance
+- matplotlib
 - LINE Messaging API
 
 ### Monitored ETFs
@@ -141,6 +148,7 @@ An AWS Lambda–based system that automatically monitors the stock prices of pop
 ### Example LINE Notification Message
 Note: Notification messages are only available in Japanese.
 
+#### Text Notification
 Example 1:
 ```
 📈ETF Price Tracker 2025-04-03
@@ -183,6 +191,10 @@ Example 2:
 前日比: -11.7%
 前週比: -15.3%
 ```
+
+#### Image Notification
+A 3-month stock price chart for VT is sent as an image. (Sample image is omitted)
+
 
 ### Environment Setup
 
