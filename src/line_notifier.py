@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import time
 from functools import wraps
 from typing import Any, Callable, Dict, TypeVar
@@ -52,6 +53,17 @@ class LineMessagingNotifier:
         """
         初期化
         """
+        # ローカル実行時のみ .env を読む（本番は環境変数注入）
+        if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or not os.getenv("LINE_USER_ID"):
+            env_path = Path(".env")
+            if env_path.exists():
+                try:
+                    from dotenv import load_dotenv
+                except ImportError:
+                    load_dotenv = None
+                if load_dotenv:
+                    load_dotenv(dotenv_path=env_path)
+
         # 環境変数から値を取得
         self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         self.user_id = os.getenv("LINE_USER_ID")
@@ -61,7 +73,6 @@ class LineMessagingNotifier:
 
         # API設定
         self.api_url = "https://api.line.me/v2/bot/message/push"
-        self.upload_api_url = "https://api-data.line.me/v2/bot/message/upload"
         self.timeout = 10  # タイムアウト設定（秒）
 
         # ヘッダー設定
@@ -98,47 +109,44 @@ class LineMessagingNotifier:
             )
 
     @retry_notification(max_retries=3, delay=10)
-    def send_image_file(self, filepath: str) -> Dict[str, Any]:
+    def send_image_url(self, image_url: str) -> Dict[str, Any]:
         """
-        画像ファイルをLINEにアップロードして送信
+        画像URLを使用して画像メッセージを送信
 
         Args:
-            filepath (str): 画像ファイルのパス
+            image_url (str): HTTPS形式の画像URL（presigned URLなど）
 
         Returns:
             dict: API レスポンス
-        """
-        # 1. 画像をLINEにアップロードして contentId を取得
-        upload_headers = {
-            "Authorization": f"Bearer {self.channel_access_token}",
-            "Content-Type": "image/png",
-        }
-        with open(filepath, "rb") as f:
-            upload_response = requests.post(
-                self.upload_api_url,
-                headers=upload_headers,
-                data=f,
-                timeout=self.timeout,
-            )
-        upload_response.raise_for_status()
-        content_id = upload_response.json()["contentId"]
 
-        # 2. contentId を使って画像メッセージを送信
-        content_url = f"content://{content_id}"
+        Raises:
+            ValueError: URLがHTTPSでない場合
+            Exception: LINE API エラー時
+        """
+        # HTTPS URLであることを検証
+        if not image_url.startswith("https://"):
+            raise ValueError(f"画像URLはHTTPSである必要があります: {image_url}")
+
+        # 画像メッセージのペイロードを作成
         payload = {
             "to": self.user_id,
             "messages": [
                 {
                     "type": "image",
-                    "originalContentUrl": content_url,
-                    "previewImageUrl": content_url,
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url,
                 }
             ],
         }
 
-        push_response = requests.post(
+        # Push APIで送信
+        response = requests.post(
             self.api_url, headers=self.headers, json=payload, timeout=self.timeout
         )
-        push_response.raise_for_status()
 
-        return {"status": "success"}
+        if response.status_code == 200:
+            return {"status": "success"}
+        else:
+            raise Exception(
+                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+            )

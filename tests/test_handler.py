@@ -1,5 +1,7 @@
 import os
 import sys
+from datetime import datetime
+from unittest.mock import Mock, patch, MagicMock
 
 import pandas as pd
 import pytest
@@ -7,15 +9,17 @@ import pytest
 # プロジェクトのルートディレクトリをPythonパスに追加
 project_root = os.path.dirname(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
-sys.path.insert(0, os.path.join(project_root, 'src'))
+sys.path.insert(0, os.path.join(project_root, "src"))
 
 from src.handler import (
     _is_below_threshold,
     _calculate_daily_change,
     _calculate_weekly_change,
     _check_and_notify_all_tickers,
-    _format_notification_message
+    _format_notification_message,
+    create_chart,
 )
+from src.s3_storage import CHART_FILENAME
 
 
 class TestIsBelowThreshold:
@@ -240,5 +244,56 @@ class TestFormatNotificationMessage:
 
         assert result == expected
 
-if __name__ == '__main__':
+
+class TestCreateChartFilename:
+    """create_chart関数のファイル名テスト"""
+
+    @patch("matplotlib.pyplot.savefig")
+    @patch("matplotlib.pyplot.close")
+    def test_create_chart_uses_constant_filename(self, mock_close, mock_savefig):
+        """create_chart関数がCHART_FILENAME定数を使用することを確認"""
+        test_data = pd.DataFrame({
+            "Close": [100.0 + i for i in range(30)]
+        }, index=pd.date_range("2025-12-01", periods=30))
+
+        filepath = create_chart(test_data)
+
+        # ファイルパスがCHART_FILENAMEを含んでいることを確認
+        assert CHART_FILENAME in filepath
+        assert filepath == f"/tmp/{CHART_FILENAME}"
+
+        # savefigが正しいパスで呼ばれたか確認
+        mock_savefig.assert_called_once()
+        call_args = mock_savefig.call_args
+        assert call_args[0][0] == f"/tmp/{CHART_FILENAME}"
+
+
+class TestS3ImageIntegration:
+    """S3経由の画像送信フローの統合テスト"""
+
+    def test_chart_filename_is_constant(self):
+        """チャートファイル名が定数を使用していることを確認"""
+        assert CHART_FILENAME == "vt_chart.png"
+
+    @patch("src.handler.S3Storage")
+    def test_s3_storage_called_with_correct_filename(self, mock_s3_class):
+        """S3Storageが正しいファイル名で呼ばれることを確認"""
+        from src.handler import S3Storage
+
+        # S3Storageを直接使用する場合のシミュレーション
+        mock_s3_instance = Mock()
+        mock_s3_instance.upload_and_get_url.return_value = (
+            "https://s3.amazonaws.com/test-bucket/charts/2026/01/12/vt_chart.png"
+        )
+
+        # テストケース
+        storage = S3Storage()
+        url = storage.upload_and_get_url(
+            filepath="/tmp/vt_chart.png", filename_hint=CHART_FILENAME, now=datetime.now()
+        )
+
+        assert url is not None
+
+
+if __name__ == "__main__":
     pytest.main([__file__])

@@ -36,7 +36,7 @@ Resources:
         ScheduleEvent:
           Type: Schedule
           Properties:
-            Schedule: cron(0 1 ? * TUE-SAT *) # 日本時間の火曜日から土曜日の午前10時に実行(UTC AM1:00, NY時間 PM 21:00)
+            Schedule: cron(0 0 ? * TUE-SAT *) # 日本時間の火曜日から土曜日の午前9時に実行(UTC AM0:00, NY夏時間AM1:00, NY冬時間AM2:00)
             Description: ETF Price Tracker Schedule Event
             Enabled: true
       Policies:
