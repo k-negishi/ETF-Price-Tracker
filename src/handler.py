@@ -21,7 +21,7 @@ class TickerData(TypedDict):
 def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
     targets = ["VT", "VOO", "QQQ", "JPY=X"]
     # 基準日
-    base_date = datetime.datetime.now().date() - datetime.timedelta(days=3)
+    base_date = datetime.datetime.now().date()
 
     all_data = yf.download(
         targets, period="1mo", group_by="ticker", end=base_date, auto_adjust=True
