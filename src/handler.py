@@ -1,11 +1,16 @@
 import datetime
 from typing import Any, Dict, List, TypedDict
 
+import matplotlib
 import pandas as pd
 import yfinance as yf
 from aws_lambda_powertools.utilities.typing import LambdaContext
+from matplotlib.dates import DateFormatter
 
 from src.line_notifier import LineMessagingNotifier
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt  # noqa: E402
 
 
 class TickerData(TypedDict):
@@ -92,6 +97,10 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             latest_date, ticker_data_for_check, usd_jpy_rate
         )
         line_notifier.send_message(message)
+
+        vt_three_months = yf.download("VT", period="3mo", auto_adjust=True)
+        chart_path = create_vt_3month_chart(vt_three_months)
+        line_notifier.send_image_file(chart_path)
 
     # Lambda用のレスポンス
     return {
@@ -191,6 +200,30 @@ def _format_notification_message(
     alert_message += f"【為替】\n"
     alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
+
+
+def create_vt_3month_chart(df: pd.DataFrame) -> str:
+    """
+    VTの直近3ヶ月のチャート画像を生成して保存する
+
+    Args:
+        df (pd.DataFrame): VTの株価データ
+
+    Returns:
+        str: 保存したPNGファイルパス
+    """
+    fig, ax = plt.subplots(figsize=(12, 6), facecolor="white")
+    ax.set_facecolor("white")
+    ax.plot(df.index, df["Close"], color="#ff9900", linewidth=2)
+    ax.set_title("VT - Last 3 Months")
+    ax.xaxis.set_major_formatter(DateFormatter("%m-%d"))
+    ax.tick_params(axis="x", rotation=45)
+    fig.tight_layout()
+
+    file_path = "/tmp/vt_3months.png"
+    fig.savefig(file_path, format="png")
+    plt.close(fig)
+    return file_path
 
 
 # スクリプトとして実行された場合のみメイン処理を実行

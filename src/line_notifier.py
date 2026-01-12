@@ -61,8 +61,8 @@ class LineMessagingNotifier:
 
         # API設定
         self.api_url = "https://api.line.me/v2/bot/message/push"
-        self.timeout = 10  # タイムアウト設定（秒）
-
+        self.upload_url = "https://api-data.line.me/v2/bot/message/upload"
+        self.timeout = 30  # タイムアウト設定（秒）
         # ヘッダー設定
         self.headers = {
             "Authorization": f"Bearer {self.channel_access_token}",
@@ -91,7 +91,63 @@ class LineMessagingNotifier:
 
         if response.status_code == 200:
             return {"status": "success"}
-        else:
-            raise Exception(
-                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+        raise Exception(
+            f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+        )
+
+    @retry_notification(max_retries=3, delay=10)
+    def send_image_file(self, filepath: str) -> Dict[str, Any]:
+        """
+        画像ファイルをLINEにアップロードして送信（リトライ機能付き）
+
+        Args:
+            filepath (str): 送信する画像ファイルパス
+
+        Returns:
+            dict: API レスポンス
+        """
+        upload_headers = {
+            "Authorization": f"Bearer {self.channel_access_token}",
+            "Content-Type": "image/png",
+            "User-Agent": "StockAlertBot/2.0",
+        }
+
+        with open(filepath, "rb") as image_file:
+            upload_response = requests.post(
+                self.upload_url,
+                headers=upload_headers,
+                data=image_file,
+                timeout=self.timeout,
             )
+
+        if upload_response.status_code != 200:
+            raise Exception(
+                "LINE Content Upload API エラー: "
+                f"HTTP {upload_response.status_code}, "
+                f"Message: {upload_response.text}"
+            )
+
+        content_id = upload_response.json().get("contentId")
+        if not content_id:
+            raise Exception("LINE Content Upload API エラー: contentIdが取得できません。")
+
+        payload = {
+            "to": self.user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": f"content://{content_id}",
+                    "previewImageUrl": f"content://{content_id}",
+                }
+            ],
+        }
+
+        response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        )
+
+        if response.status_code == 200:
+            return {"status": "success", "content_id": content_id}
+        raise Exception(
+            f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+        )
