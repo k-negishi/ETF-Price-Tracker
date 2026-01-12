@@ -1,6 +1,7 @@
 ruff>=0.5.5
 pre-commit>=3.8.0
 mypy>=1.11.0
+python-dotenv>=1.0.1
 pytest==8.4.1
 moto>=4.2.0
 types-requests

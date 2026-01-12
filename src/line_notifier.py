@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import time
 from functools import wraps
 from typing import Any, Callable, Dict, TypeVar
@@ -52,6 +53,17 @@ class LineMessagingNotifier:
         """
         初期化
         """
+        # ローカル実行時のみ .env を読む（本番は環境変数注入）
+        if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or not os.getenv("LINE_USER_ID"):
+            env_path = Path(".env")
+            if env_path.exists():
+                try:
+                    from dotenv import load_dotenv
+                except ImportError:
+                    load_dotenv = None
+                if load_dotenv:
+                    load_dotenv(dotenv_path=env_path)
+
         # 環境変数から値を取得
         self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
         self.user_id = os.getenv("LINE_USER_ID")
@@ -85,6 +97,49 @@ class LineMessagingNotifier:
         payload = {"to": self.user_id, "messages": [{"type": "text", "text": message}]}
 
         # API リクエスト送信
+        response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        )
+
+        if response.status_code == 200:
+            return {"status": "success"}
+        else:
+            raise Exception(
+                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+            )
+
+    @retry_notification(max_retries=3, delay=10)
+    def send_image_url(self, image_url: str) -> Dict[str, Any]:
+        """
+        画像URLを使用して画像メッセージを送信
+
+        Args:
+            image_url (str): HTTPS形式の画像URL（presigned URLなど）
+
+        Returns:
+            dict: API レスポンス
+
+        Raises:
+            ValueError: URLがHTTPSでない場合
+            Exception: LINE API エラー時
+        """
+        # HTTPS URLであることを検証
+        if not image_url.startswith("https://"):
+            raise ValueError(f"画像URLはHTTPSである必要があります: {image_url}")
+
+        # 画像メッセージのペイロードを作成
+        payload = {
+            "to": self.user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url,
+                }
+            ],
+        }
+
+        # Push APIで送信
         response = requests.post(
             self.api_url, headers=self.headers, json=payload, timeout=self.timeout
         )
