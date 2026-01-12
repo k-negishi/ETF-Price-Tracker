@@ -9,7 +9,7 @@ env:
   AWS_REGION: ap-northeast-1
 
 jobs:
-  setup:
+  lint:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,7 +20,46 @@ jobs:
         with:
           python-version: '3.13'
           cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint with ruff
+        run: ruff check src
+
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Format with ruff
+        run: ruff format --check src
+
+  type-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+          cache: 'pip'
 
       - name: Install dependencies
         run: |
@@ -28,59 +67,10 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
-  lint:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
-
-      - name: Lint with ruff
-        run: ruff check src
-
-  format:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
-
-      - name: Format with ruff
-        run: ruff format --check src
-
-  type-check:
-    needs: setup
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.13'
-          cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
-
       - name: Type check with mypy
         run: mypy src
 
   test:
-    needs: setup
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -91,7 +81,12 @@ jobs:
         with:
           python-version: '3.13'
           cache: 'pip'
-          cache-dependency-path: '**/requirements*.txt'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Run tests
         run: python -m pytest tests/ -v
