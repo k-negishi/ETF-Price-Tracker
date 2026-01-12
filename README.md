@@ -168,7 +168,7 @@ pip install -r requirements-dev.txt
 ```bash
 ruff check src --fix
 ruff format src
-mypy src --strict
+mypy src
 ```
 
 #### テスト実行
@@ -335,6 +335,7 @@ If `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` are set in `.env`, they will b
 ```bash
 ruff check src --fix
 ruff format src
+mypy src
 ```
 
 #### Run Tests
