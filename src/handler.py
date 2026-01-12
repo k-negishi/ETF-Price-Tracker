@@ -188,7 +188,7 @@ def _format_notification_message(
         alert_message += f"前日比: {ticker['daily_change']}%\n"
         alert_message += f"前週比: {ticker['weekly_change']}%\n\n"
 
-    alert_message += f"【為替】\n"
+    alert_message += "【為替】\n"
     alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
 

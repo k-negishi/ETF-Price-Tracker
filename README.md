@@ -97,9 +97,22 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+#### 開発用依存関係のインストール
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ### ローカル開発
 
 #### ローカル実行
+
+#### 静的解析・フォーマット
+
+```bash
+ruff check src --fix
+ruff format src
+```
 
 #### テスト実行
 
@@ -199,9 +212,29 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+#### Install Dev Dependencies
+
+```bash
+pip install -r requirements-dev.txt
+```
+
 ### Local Development
 
 #### Local Execution
+
+#### Lint and Format
+
+```bash
+ruff check src --fix
+ruff format src
+```
+
+#### pre-commit
+
+```bash
+pre-commit install
+pre-commit run --all-files
+```
 
 #### Run Tests
 
