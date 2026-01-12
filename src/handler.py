@@ -29,17 +29,17 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     print(all_data)
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
-    # if all_data.index[-1].date() != datetime.datetime.now().date() - datetime.timedelta(
-    #     days=1
-    # ):
-    #     return {
-    #         "statusCode": 200,
-    #         "body": {
-    #             "notification_sent": False,
-    #             "ticker_count": 0,
-    #             "message": "Market is closed today",
-    #         },
-    #     }
+    if all_data.index[-1].date() != datetime.datetime.now().date() - datetime.timedelta(
+        days=1
+    ):
+        return {
+            "statusCode": 200,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": 0,
+                "message": "Market is closed today",
+            },
+        }
 
     # 各ティッカーのデータを個別の変数に格納
     vt_data: pd.DataFrame = all_data["VT"]
