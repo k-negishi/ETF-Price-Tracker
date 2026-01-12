@@ -95,3 +95,38 @@ class LineMessagingNotifier:
             raise Exception(
                 f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
             )
+
+    @retry_notification(max_retries=3, delay=10)
+    def send_image(self, image_url: str) -> Dict[str, Any]:
+        """
+        LINEに画像URLを送信（リトライ機能付き）
+
+        Args:
+            image_url (str): 送信する画像のURL
+
+        Returns:
+            dict: API レスポンス
+        """
+        # リクエストボディ作成
+        payload = {
+            "to": self.user_id,
+            "messages": [
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url,
+                }
+            ],
+        }
+
+        # API リクエスト送信
+        response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        )
+
+        if response.status_code == 200:
+            return {"status": "success"}
+        else:
+            raise Exception(
+                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+            )

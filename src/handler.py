@@ -1,6 +1,8 @@
 import datetime
+import os
 from typing import Any, Dict, List, TypedDict
 
+import matplotlib.pyplot as plt
 import pandas as pd
 import yfinance as yf
 from aws_lambda_powertools.utilities.typing import LambdaContext
@@ -15,7 +17,13 @@ class TickerData(TypedDict):
     current_price: float
 
 
+from src.s3_uploader import S3Uploader
+
+
 def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
+    # グラフ描画用にVTの6ヶ月分のデータを取得
+    vt_daily_data_6mo = yf.download("VT", period="6mo", auto_adjust=True)
+
     targets = ["VT", "VOO", "QQQ", "JPY=X"]
     all_data = yf.download(targets, period="1mo", group_by="ticker", auto_adjust=True)
 
@@ -87,6 +95,20 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         # JPY=X のデータを取得
         jpy_data: pd.DataFrame = all_data["JPY=X"]
         usd_jpy_rate = jpy_data["Close"].iloc[-1]
+
+        # グラフを生成
+        vt_graph_path = _generate_vt_graph(vt_daily_data_6mo)
+
+        # S3にアップロード
+        s3_bucket_name = os.getenv("S3_BUCKET_NAME")
+        if not s3_bucket_name:
+            raise ValueError("S3_BUCKET_NAME environment variable is not set.")
+        s3_uploader = S3Uploader(bucket_name=s3_bucket_name)
+        s3_key = f"vt_graph_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        image_url = s3_uploader.upload_file(vt_graph_path, s3_key)
+
+        # LINEに画像を送信
+        line_notifier.send_image(image_url)
 
         message = _format_notification_message(
             latest_date, ticker_data_for_check, usd_jpy_rate
@@ -191,6 +213,46 @@ def _format_notification_message(
     alert_message += f"【為替】\n"
     alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
+
+
+def _generate_vt_graph(vt_data: pd.DataFrame) -> str:
+    """
+    VTの6ヶ月間の株価推移グラフを生成し、一時ファイルに保存
+
+    Args:
+        vt_data (pd.DataFrame): VTの6ヶ月間の日次株価データ
+
+    Returns:
+        str: 生成されたグラフ画像のファイルパス
+    """
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    # メインの株価チャート
+    ax.plot(vt_data.index, vt_data["Close"], label="VT Close Price", color="cyan")
+    ax.set_title("VT 6-Month Price Trend", color="white")
+    ax.set_xlabel("Date", color="white")
+    ax.set_ylabel("Price (USD)", color="white")
+    ax.legend()
+    ax.grid(True, linestyle="--", alpha=0.3)
+
+    # X軸とY軸の目盛りを白に設定
+    ax.tick_params(axis="x", colors="white")
+    ax.tick_params(axis="y", colors="white")
+
+    # グラフの枠線を白に設定
+    for spine in ax.spines.values():
+        spine.set_edgecolor("white")
+
+    # 一時ファイルに保存
+    save_dir = "/tmp/etf_graphs"
+    os.makedirs(save_dir, exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_path = os.path.join(save_dir, f"vt_graph_{timestamp}.png")
+    fig.savefig(file_path, bbox_inches="tight", pad_inches=0.1, facecolor="black")
+    plt.close(fig)
+
+    return file_path
 
 
 # スクリプトとして実行された場合のみメイン処理を実行

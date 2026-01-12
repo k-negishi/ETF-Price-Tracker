@@ -1,5 +1,6 @@
 import os
 import sys
+from unittest.mock import MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -14,7 +15,8 @@ from src.handler import (
     _calculate_daily_change,
     _calculate_weekly_change,
     _check_and_notify_all_tickers,
-    _format_notification_message
+    _format_notification_message,
+    _generate_vt_graph
 )
 
 
@@ -240,5 +242,38 @@ class TestFormatNotificationMessage:
 
         assert result == expected
 
-if __name__ == '__main__':
+
+class TestGenerateVtGraph:
+    """_generate_vt_graph関数のテストクラス"""
+
+    @patch("src.handler.plt")
+    def test_generate_vt_graph(self, mock_plt):
+        """グラフが正常に生成され、指定したパスに保存されることをテスト"""
+        # モックの設定
+        mock_fig = MagicMock()
+        mock_ax = MagicMock()
+        mock_plt.subplots.return_value = (mock_fig, mock_ax)
+
+        # テストデータの作成
+        vt_data = pd.DataFrame(
+            {"Close": [100, 105, 102]},
+            index=pd.to_datetime(["2023-01-01", "2023-01-02", "2023-01-03"]),
+        )
+
+        # テスト対象関数の実行
+        file_path = _generate_vt_graph(vt_data)
+
+        # アサーション
+        mock_plt.style.use.assert_called_with("dark_background")
+        mock_plt.subplots.assert_called_with(figsize=(10, 6))
+        mock_ax.plot.assert_called_with(
+            vt_data.index, vt_data["Close"], label="VT Close Price", color="cyan"
+        )
+        mock_ax.set_title.assert_called_with("VT 6-Month Price Trend", color="white")
+        mock_fig.savefig.assert_called_once()
+        assert file_path.startswith("/tmp/etf_graphs/vt_graph_")
+        assert file_path.endswith(".png")
+
+
+if __name__ == "__main__":
     pytest.main([__file__])
