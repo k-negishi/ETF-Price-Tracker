@@ -1,11 +1,18 @@
 import datetime
+import os
+import uuid
 from typing import Any, Dict, List, TypedDict
 
+import boto3
+import matplotlib
 import pandas as pd
 import yfinance as yf
 from aws_lambda_powertools.utilities.typing import LambdaContext
 
 from src.line_notifier import LineMessagingNotifier
+
+matplotlib.use("Agg")
+from matplotlib import pyplot as plt  # noqa: E402
 
 
 class TickerData(TypedDict):
@@ -91,7 +98,19 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         message = _format_notification_message(
             latest_date, ticker_data_for_check, usd_jpy_rate
         )
-        line_notifier.send_message(message)
+        messages: list[Dict[str, Any]] = [{"type": "text", "text": message}]
+
+        vt_chart_url = _create_vt_chart_url()
+        if vt_chart_url:
+            messages.append(
+                {
+                    "type": "image",
+                    "originalContentUrl": vt_chart_url,
+                    "previewImageUrl": vt_chart_url,
+                }
+            )
+
+        line_notifier.send_messages(messages)
 
     # Lambda用のレスポンス
     return {
@@ -191,6 +210,59 @@ def _format_notification_message(
     alert_message += f"【為替】\n"
     alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
+
+
+def _create_vt_chart_url() -> str | None:
+    vt_chart_data = yf.download("VT", period="6mo", auto_adjust=True)
+    if vt_chart_data.empty:
+        return None
+
+    chart_path = f"/tmp/vt-6mo-{uuid.uuid4().hex}.png"
+    _render_vt_chart(vt_chart_data, chart_path)
+    return _upload_chart_to_s3(chart_path)
+
+
+def _render_vt_chart(vt_chart_data: pd.DataFrame, output_path: str) -> None:
+    plt.rcParams["font.family"] = "sans-serif"
+    plt.rcParams["font.sans-serif"] = [
+        "Noto Sans CJK JP",
+        "IPAexGothic",
+        "Hiragino Sans",
+        "Yu Gothic",
+        "Meiryo",
+        "DejaVu Sans",
+    ]
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(vt_chart_data.index, vt_chart_data["Close"], color="#2563eb", linewidth=2)
+    ax.set_title("VT 半年間推移")
+    ax.set_xlabel("日付")
+    ax.set_ylabel("終値(USD)")
+    ax.grid(True, linestyle="--", alpha=0.4)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=140)
+    plt.close(fig)
+
+
+def _upload_chart_to_s3(chart_path: str) -> str | None:
+    bucket = os.getenv("GRAPH_BUCKET")
+    if not bucket:
+        return None
+
+    prefix = os.getenv("GRAPH_PREFIX", "line-graphs").strip("/")
+    key = f"{prefix}/vt-6mo-{datetime.datetime.utcnow():%Y%m%d%H%M%S}.png"
+    s3_client = boto3.client("s3")
+    s3_client.upload_file(
+        chart_path,
+        bucket,
+        key,
+        ExtraArgs={"ContentType": "image/png"},
+    )
+    return s3_client.generate_presigned_url(
+        "get_object",
+        Params={"Bucket": bucket, "Key": key},
+        ExpiresIn=3600,
+    )
 
 
 # スクリプトとして実行された場合のみメイン処理を実行

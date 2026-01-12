@@ -71,9 +71,31 @@ class LineMessagingNotifier:
         }
 
     @retry_notification(max_retries=3, delay=10)
-    def send_message(self, message: str) -> Dict[str, Any]:
+    def send_messages(self, messages: list[Dict[str, Any]]) -> Dict[str, Any]:
         """
         LINE通知メッセージを送信（リトライ機能付き）
+
+        Args:
+            messages (list[dict]): 送信するメッセージ配列
+
+        Returns:
+            dict: API レスポンス
+        """
+        payload = {"to": self.user_id, "messages": messages}
+
+        response = requests.post(
+            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        )
+
+        if response.status_code == 200:
+            return {"status": "success"}
+        raise Exception(
+            f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
+        )
+
+    def send_message(self, message: str) -> Dict[str, Any]:
+        """
+        LINE通知メッセージを送信
 
         Args:
             message (str): 送信するメッセージ
@@ -81,17 +103,25 @@ class LineMessagingNotifier:
         Returns:
             dict: API レスポンス
         """
-        # リクエストボディ作成
-        payload = {"to": self.user_id, "messages": [{"type": "text", "text": message}]}
+        return self.send_messages([{"type": "text", "text": message}])
 
-        # API リクエスト送信
-        response = requests.post(
-            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+    def send_image(self, original_url: str, preview_url: str) -> Dict[str, Any]:
+        """
+        LINE通知に画像を送信
+
+        Args:
+            original_url (str): 画像URL
+            preview_url (str): プレビュー画像URL
+
+        Returns:
+            dict: API レスポンス
+        """
+        return self.send_messages(
+            [
+                {
+                    "type": "image",
+                    "originalContentUrl": original_url,
+                    "previewImageUrl": preview_url,
+                }
+            ]
         )
-
-        if response.status_code == 200:
-            return {"status": "success"}
-        else:
-            raise Exception(
-                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
-            )
