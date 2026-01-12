@@ -113,6 +113,8 @@ pip install -r requirements-dev.txt
 
 #### ローカル実行
 
+`.env` に `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` を設定しておくと、ローカル実行時に自動で読み込みます。
+
 #### 静的解析・フォーマット
 
 ```bash
@@ -121,6 +123,10 @@ ruff format src
 ```
 
 #### テスト実行
+
+```bash
+python -c "from src.handler import lambda_handler; from aws_lambda_powertools.utilities.typing import LambdaContext; print(lambda_handler({}, LambdaContext()))"
+```
 
 ```bash
 python -m pytest tests/
@@ -234,6 +240,8 @@ pip install -r requirements-dev.txt
 
 #### Local Execution
 
+If you set `LINE_CHANNEL_ACCESS_TOKEN` and `LINE_USER_ID` in `.env`, they are loaded automatically for local runs.
+
 #### Lint and Format
 
 ```bash
@@ -249,6 +257,10 @@ pre-commit run --all-files
 ```
 
 #### Run Tests
+
+```bash
+python -c "from src.handler import lambda_handler; from aws_lambda_powertools.utilities.typing import LambdaContext; print(lambda_handler({}, LambdaContext()))"
+```
 
 ```bash
 python -m pytest tests/
