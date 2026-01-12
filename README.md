@@ -20,7 +20,7 @@
 
 ### 概要
 
-VT、VOO、QQQの人気ETFの価格を監視し、設定した割合よりも下落した場合にLINE通知する AWS Lambda ベースのアプリケーションです。
+VT、VOO、QQQの人気ETFの価格とUSD/JPY為替レートを監視し、設定した割合よりも下落した場合にLINE通知する AWS Lambda ベースのアプリケーションです。
 
 ### 使用技術
 - AWS Lambda
@@ -57,6 +57,9 @@ VT、VOO、QQQの人気ETFの価格を監視し、設定した割合よりも下
 現在値: $352.10
 前日比: -5.97%
 前週比: -8.5%
+
+【為替】
+USD/JPY: 150.25
 ```
 
 例2:
@@ -117,7 +120,7 @@ GitHub Actions と AWS SAM を使用したサーバーレスアプリケーシ�
 
 ### Overview
 
-An AWS Lambda–based system that automatically monitors the stock prices of popular ETFs such as VT, VOO, and QQQ, and sends LINE notifications when the prices fall below predefined thresholds.
+An AWS Lambda–based system that automatically monitors the stock prices of popular ETFs such as VT, VOO, and QQQ, along with the USD/JPY exchange rate, and sends LINE notifications when the prices fall below predefined thresholds.
 
 ### Technologies Used
 - AWS Lambda
@@ -156,6 +159,9 @@ Example 1:
 現在値: $352.10
 前日比: -5.97%
 前週比: -8.5%
+
+【為替】
+USD/JPY: 150.25
 ```
 
 Example 2:
