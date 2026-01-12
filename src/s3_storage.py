@@ -100,7 +100,7 @@ class S3Storage:
             S3StorageError: URL生成失敗時
         """
         try:
-            url = self.s3_client.generate_presigned_url(
+            url: str = self.s3_client.generate_presigned_url(
                 ClientMethod="get_object",
                 Params={"Bucket": self.bucket_name, "Key": key},
                 ExpiresIn=expires_in,

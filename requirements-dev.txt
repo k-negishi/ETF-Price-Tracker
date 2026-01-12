@@ -6,3 +6,6 @@ pytest==8.4.1
 moto>=4.2.0
 types-requests
 pandas-stubs
+boto3-stubs>=1.42.0
+types-boto3-s3>=1.42.0
+typing-extensions>=4.8.0

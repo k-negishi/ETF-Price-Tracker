@@ -58,11 +58,11 @@ class LineMessagingNotifier:
             env_path = Path(".env")
             if env_path.exists():
                 try:
-                    from dotenv import load_dotenv
+                    from dotenv import load_dotenv as load_env_file
+
+                    load_env_file(dotenv_path=env_path)
                 except ImportError:
-                    load_dotenv = None
-                if load_dotenv:
-                    load_dotenv(dotenv_path=env_path)
+                    pass
 
         # 環境変数から値を取得
         self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")

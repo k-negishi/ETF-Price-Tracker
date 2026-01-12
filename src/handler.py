@@ -233,7 +233,7 @@ def create_chart(df: pd.DataFrame) -> str:
     ax.set_title("VT - Last 6 Months", fontsize=16)
     ax.set_facecolor("white")
     fig.set_facecolor("white")
-    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))
+    ax.xaxis.set_major_formatter(mdates.DateFormatter("%m-%d"))  # type: ignore[no-untyped-call]
     plt.xticks(rotation=45)
     plt.grid(True, linestyle="--", alpha=0.6)
 

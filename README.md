@@ -163,11 +163,12 @@ pip install -r requirements-dev.txt
 
 `.env` に `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` を設定しておくと、ローカル実行時に自動で読み込みます。
 
-#### 静的解析・フォーマット
+#### 静的解析・フォーマット・型チェック
 
 ```bash
 ruff check src --fix
 ruff format src
+mypy src --strict
 ```
 
 #### テスト実行
