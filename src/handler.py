@@ -28,7 +28,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         period="1mo",
         group_by="ticker",
         end=base_date,
-        auto_adjust=True
+        auto_adjust=True,
     )
     print(all_data)
 
@@ -90,49 +90,53 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     # notification_needed = check_and_notify_all_tickers(ticker_data_for_check, DAILY_THRESHOLD, WEEKLY_THRESHOLD)
     notification_needed = True
 
+    # 通知が必要ない場合は処理をスキップ
+    if not notification_needed:
+        return {
+            "statusCode": 200,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": len(ticker_data_for_check),
+                "message": "Stock monitoring completed successfully",
+            },
+        }
+
     # 閾値を下回るETFが1つでも存在する場合、LINE通知を送信
-    if notification_needed:
-        line_notifier = LineMessagingNotifier()
+    line_notifier = LineMessagingNotifier()
 
-        latest_date = base_date
+    latest_date = base_date
 
-        # JPY=X のデータを取得
-        jpy_data: pd.DataFrame = all_data["JPY=X"]
-        usd_jpy_rate = jpy_data["Close"].iloc[-1]
+    # JPY=X のデータを取得
+    jpy_data: pd.DataFrame = all_data["JPY=X"]
+    usd_jpy_rate = jpy_data["Close"].iloc[-1]
 
-        message = _format_notification_message(
-            latest_date=latest_date,
-            ticker_data_list=ticker_data_for_check,
-            usd_jpy_rate=usd_jpy_rate
+    message = _format_notification_message(
+        latest_date=latest_date,
+        ticker_data_list=ticker_data_for_check,
+        usd_jpy_rate=usd_jpy_rate,
+    )
+    line_notifier.send_message(message)
+
+    # VTの3ヶ月グラフを生成してS3経由で送信
+    vt_df_6mo = yf.download(tickers="VT", period="6mo", auto_adjust=True)
+    chart_filepath = create_chart(vt_df_6mo)
+
+    try:
+        s3_storage = S3Storage()
+        now = datetime.datetime.now()
+        presigned_url = s3_storage.upload_and_get_url(
+            filepath=chart_filepath, filename_hint=CHART_FILENAME, now=now
         )
-        line_notifier.send_message(message)
-
-        # VTの3ヶ月グラフを生成してS3経由で送信
-        vt_df_6mo = yf.download(
-            tickers="VT",
-            period="6mo",
-            auto_adjust=True
-        )
-        chart_filepath = create_chart(vt_df_6mo)
-
-        try:
-            s3_storage = S3Storage()
-            now = datetime.datetime.now()
-            presigned_url = s3_storage.upload_and_get_url(
-                filepath=chart_filepath,
-                filename_hint=CHART_FILENAME,
-                now=now
-            )
-            line_notifier.send_image_url(presigned_url)
-        except S3StorageError as e:
-            # S3エラーはログに記録するが、テキスト通知は既に送信済みなので処理は継続
-            print(f"S3アップロードエラー: {e}")
+        line_notifier.send_image_url(presigned_url)
+    except S3StorageError as e:
+        # S3エラーはログに記録するが、テキスト通知は既に送信済みなので処理は継続
+        print(f"S3アップロードエラー: {e}")
 
     # Lambda用のレスポンス
     return {
         "statusCode": 200,
         "body": {
-            "notification_sent": notification_needed,
+            "notification_sent": True,
             "ticker_count": len(ticker_data_for_check),
             "message": "Stock monitoring completed successfully",
         },
