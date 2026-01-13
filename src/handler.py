@@ -116,10 +116,10 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     line_notifier.send_message(message)
 
     # VTの3ヶ月グラフを生成してS3経由で送信
-    vt_df_6mo = yf.download(tickers="VT", period="6mo", auto_adjust=True)
-    chart_filepath = create_chart(vt_df_6mo)
-
     try:
+        vt_df_6mo = yf.download(tickers="VT", period="6mo", auto_adjust=True)
+        chart_filepath = create_chart(vt_df_6mo)
+
         s3_storage = S3Storage()
         now = datetime.datetime.now()
         presigned_url = s3_storage.upload_and_get_url(
@@ -129,6 +129,12 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     except S3StorageError as e:
         # S3エラーはログに記録するが、テキスト通知は既に送信済みなので処理は継続
         print(f"S3アップロードエラー: {e}")
+    except ValueError as e:
+        # S3_BUCKET未設定などの設定不備はログのみ残して通知処理は継続
+        print(f"S3設定エラー: {e}")
+    except Exception as e:
+        # 画像生成/送信時の予期しないエラーで再試行されないようにログのみ残す
+        print(f"画像通知の送信に失敗しました: {e}")
 
     # Lambda用のレスポンス
     return {
