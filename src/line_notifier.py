@@ -83,70 +83,34 @@ class LineMessagingNotifier:
         }
 
     @retry_notification(max_retries=3, delay=10)
-    def send_message(self, message: str) -> Dict[str, Any]:
+    def send_messages(self, messages: list[Dict[str, Any]]) -> Dict[str, Any]:
         """
         LINE通知メッセージを送信（リトライ機能付き）
 
         Args:
-            message (str): 送信するメッセージ
+            messages (list[dict]): 送信するメッセージ配列
 
         Returns:
             dict: API レスポンス
         """
-        # リクエストボディ作成
-        payload = {"to": self.user_id, "messages": [{"type": "text", "text": message}]}
+        for message in messages:
+            if message.get("type") == "image":
+                image_url = message.get("originalContentUrl", "")
+                if not isinstance(image_url, str) or not image_url.startswith(
+                    "https://"
+                ):
+                    raise ValueError(
+                        f"画像URLはHTTPSである必要があります: {image_url}"
+                    )
 
-        # API リクエスト送信
+        payload = {"to": self.user_id, "messages": messages}
+
         response = requests.post(
             self.api_url, headers=self.headers, json=payload, timeout=self.timeout
         )
 
         if response.status_code == 200:
             return {"status": "success"}
-        else:
-            raise Exception(
-                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
-            )
-
-    @retry_notification(max_retries=3, delay=10)
-    def send_image_url(self, image_url: str) -> Dict[str, Any]:
-        """
-        画像URLを使用して画像メッセージを送信
-
-        Args:
-            image_url (str): HTTPS形式の画像URL（presigned URLなど）
-
-        Returns:
-            dict: API レスポンス
-
-        Raises:
-            ValueError: URLがHTTPSでない場合
-            Exception: LINE API エラー時
-        """
-        # HTTPS URLであることを検証
-        if not image_url.startswith("https://"):
-            raise ValueError(f"画像URLはHTTPSである必要があります: {image_url}")
-
-        # 画像メッセージのペイロードを作成
-        payload = {
-            "to": self.user_id,
-            "messages": [
-                {
-                    "type": "image",
-                    "originalContentUrl": image_url,
-                    "previewImageUrl": image_url,
-                }
-            ],
-        }
-
-        # Push APIで送信
-        response = requests.post(
-            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
+        raise Exception(
+            f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
         )
-
-        if response.status_code == 200:
-            return {"status": "success"}
-        else:
-            raise Exception(
-                f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
-            )

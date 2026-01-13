@@ -12,6 +12,10 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<String>
     Default: /etf-price-tracker/line-user-id
     Description: LINE User ID
+  S3Bucket:
+    Type: AWS::SSM::Parameter::Value<String>
+    Default: /etf-price-tracker/s3-bucket
+    Description: S3 bucket name for chart image uploads
 
 Globals:
   Function:
@@ -31,6 +35,7 @@ Resources:
         Variables:
           LINE_CHANNEL_ACCESS_TOKEN: !Ref LineChannelAccessToken
           LINE_USER_ID: !Ref LineUserId
+          S3_BUCKET: !Ref S3Bucket
 
       Events:
         ScheduleEvent:
@@ -48,6 +53,11 @@ Resources:
                 - logs:CreateLogStream
                 - logs:PutLogEvents
               Resource: "*"
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:GetObject
+              Resource: !Sub "arn:aws:s3:::${S3Bucket}/charts/*"
 
   EtfPriceTrackerLogGroup:
     Type: AWS::Logs::LogGroup
