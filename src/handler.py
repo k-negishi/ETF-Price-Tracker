@@ -125,7 +125,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             filepath=chart_filepath, filename_hint=CHART_FILENAME, now=now
         )
     except S3StorageError as e:
-        # S3エラーはログに記録するが、テキスト通知は既に送信済みなので処理は継続
+        # S3エラーはログに記録するが、テキスト通知はこの後送信するため処理は継続
         print(f"S3アップロードエラー: {e}")
     except ValueError as e:
         # S3_BUCKET未設定などの設定不備はログのみ残して通知処理は継続
@@ -134,16 +134,17 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         # 画像生成/送信時の予期しないエラーで再試行されないようにログのみ残す
         print(f"画像通知の送信に失敗しました: {e}")
 
-    message_payloads = [{"type": "text", "text": message}]
+    event_id = event.get("id") if isinstance(event, dict) else None
+    retry_seed = event_id or message
+    text_retry_key = line_notifier.build_retry_key(retry_seed)
+    line_notifier.send_message(message, text_retry_key)
+
     if image_url:
-        message_payloads.append(
-            {
-                "type": "image",
-                "originalContentUrl": image_url,
-                "previewImageUrl": image_url,
-            }
-        )
-    line_notifier.send_messages(message_payloads)
+        try:
+            image_retry_key = line_notifier.build_retry_key(f"{retry_seed}-image")
+            line_notifier.send_image_url(image_url, image_retry_key)
+        except Exception as e:
+            print(f"画像通知の送信に失敗しました: {e}")
 
     # Lambda用のレスポンス
     return {
