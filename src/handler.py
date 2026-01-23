@@ -1,4 +1,5 @@
 import datetime
+import time
 from typing import Any, Dict, List, TypedDict
 
 import matplotlib.dates as mdates
@@ -23,7 +24,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     # 基準日
     base_date = datetime.datetime.now().date()
 
-    all_data = yf.download(
+    all_data = _download_with_retry(
         tickers=targets,
         period="1mo",
         group_by="ticker",
@@ -116,7 +117,11 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     image_url: str | None = None
     # VTの3ヶ月グラフを生成してS3経由で送信
     try:
-        vt_df_6mo = yf.download(tickers="VT", period="6mo", auto_adjust=True)
+        vt_df_6mo = _download_with_retry(
+            tickers="VT",
+            period="6mo",
+            auto_adjust=True,
+        )
         chart_filepath = create_chart(vt_df_6mo)
 
         s3_storage = S3Storage()
@@ -169,6 +174,71 @@ def _is_market_closed(all_data: pd.DataFrame) -> bool:
     latest_date = all_data.index[-1].date()
     expected_date = datetime.datetime.now().date() - datetime.timedelta(days=1)
     return latest_date != expected_date
+
+
+def _download_with_retry(
+    tickers: str | List[str],
+    period: str,
+    auto_adjust: bool,
+    group_by: str | None = None,
+    end: datetime.date | None = None,
+    max_retries: int = 3,
+    base_sleep_seconds: float = 2.0,
+) -> pd.DataFrame:
+    """
+    NaNが含まれる場合は一定間隔でリトライしながらyfinanceから取得する
+
+    Args:
+        tickers: ティッカー指定
+        period: 取得期間
+        auto_adjust: 分割や配当を調整するかどうか
+        group_by: yfinanceのgroup_by指定
+        end: 取得終了日
+        max_retries: 最大リトライ回数
+        base_sleep_seconds: リトライ間隔のベース秒数
+
+    Returns:
+        pd.DataFrame: ダウンロード結果
+    """
+    last_data: pd.DataFrame | None = None
+    for attempt in range(1, max_retries + 1):
+        last_data = yf.download(
+            tickers=tickers,
+            period=period,
+            group_by=group_by,
+            end=end,
+            auto_adjust=auto_adjust,
+        )
+        if not _has_nan_in_latest_close(last_data, tickers):
+            return last_data
+        if attempt < max_retries:
+            sleep_seconds = base_sleep_seconds * attempt
+            print(
+                "yfinanceの取得結果にNaNが含まれるためリトライします。"
+                f"attempt={attempt}/{max_retries}, sleep={sleep_seconds}s"
+            )
+            time.sleep(sleep_seconds)
+    return last_data if last_data is not None else pd.DataFrame()
+
+
+def _has_nan_in_latest_close(data: pd.DataFrame, tickers: str | List[str]) -> bool:
+    if data.empty or "Close" not in data.columns and not isinstance(
+        data.columns, pd.MultiIndex
+    ):
+        return True
+
+    if isinstance(data.columns, pd.MultiIndex):
+        ticker_list = [tickers] if isinstance(tickers, str) else tickers
+        for ticker in ticker_list:
+            if ticker not in data.columns.get_level_values(0):
+                return True
+            latest_close = data[ticker]["Close"].iloc[-1]
+            if pd.isna(latest_close):
+                return True
+        return False
+
+    latest_close = data["Close"].iloc[-1]
+    return bool(pd.isna(latest_close))
 
 
 def _is_below_threshold(change: float, threshold: float) -> bool:
