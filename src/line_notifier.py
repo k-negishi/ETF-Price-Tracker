@@ -1,47 +1,17 @@
+import hashlib
 import os
 from pathlib import Path
 import time
-from functools import wraps
-from typing import Any, Callable, Dict, TypeVar
+from typing import Any, Dict
 
 import requests
-from typing_extensions import ParamSpec
-
-P = ParamSpec("P")
-R = TypeVar("R")
 
 
-def retry_notification(
-    max_retries: int = 3, delay: int = 10
-) -> Callable[[Callable[P, R]], Callable[P, R]]:
-    """
-    通知送信用リトライデコレータ
 
-    Args:
-        max_retries (int): 最大リトライ回数
-        delay (int): リトライ間隔（秒）
-    """
+class LineMessagingRetryableError(Exception):
+    """リトライ対象のLINE送信エラー"""
 
-    def decorator(func: Callable[P, R]) -> Callable[P, R]:
-        @wraps(func)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            last_exception: Exception | None = None
-
-            for attempt in range(max_retries):
-                try:
-                    result = func(*args, **kwargs)
-                    return result
-                except Exception as e:
-                    last_exception = e
-
-                    if attempt < max_retries - 1:
-                        time.sleep(delay)
-
-            raise last_exception if last_exception else Exception("通知送信失敗")
-
-        return wrapper
-
-    return decorator
+    pass
 
 
 class LineMessagingNotifier:
@@ -74,6 +44,8 @@ class LineMessagingNotifier:
         # API設定
         self.api_url = "https://api.line.me/v2/bot/message/push"
         self.timeout = 10  # タイムアウト設定（秒）
+        self.max_retries = 3
+        self.retry_delay = 10
 
         # ヘッダー設定
         self.headers = {
@@ -82,13 +54,28 @@ class LineMessagingNotifier:
             "User-Agent": "StockAlertBot/2.0",
         }
 
-    @retry_notification(max_retries=3, delay=10)
-    def send_messages(self, messages: list[Dict[str, Any]]) -> Dict[str, Any]:
+    @staticmethod
+    def build_retry_key(seed: str) -> str:
+        """
+        冪等性確保用のリトライキーを生成
+
+        Args:
+            seed (str): キー生成に使う文字列
+
+        Returns:
+            str: SHA-256ハッシュ（HEX）
+        """
+        return hashlib.sha256(seed.encode("utf-8")).hexdigest()
+
+    def send_messages(
+        self, messages: list[Dict[str, Any]], retry_key: str | None = None
+    ) -> Dict[str, Any]:
         """
         LINE通知メッセージを送信（リトライ機能付き）
 
         Args:
             messages (list[dict]): 送信するメッセージ配列
+            retry_key (str | None): 冪等性確保用のリトライキー
 
         Returns:
             dict: API レスポンス
@@ -104,13 +91,37 @@ class LineMessagingNotifier:
                     )
 
         payload = {"to": self.user_id, "messages": messages}
+        resolved_retry_key = retry_key or self.build_retry_key(str(payload))
+        headers = {**self.headers, "X-Line-Retry-Key": resolved_retry_key}
+        last_exception: Exception | None = None
 
-        response = requests.post(
-            self.api_url, headers=self.headers, json=payload, timeout=self.timeout
-        )
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.post(
+                    self.api_url, headers=headers, json=payload, timeout=self.timeout
+                )
 
-        if response.status_code == 200:
-            return {"status": "success"}
-        raise Exception(
-            f"LINE API エラー: HTTP {response.status_code}, Message: {response.text}"
-        )
+                if response.status_code == 200:
+                    return {"status": "success"}
+
+                error = Exception(
+                    "LINE API エラー: "
+                    f"HTTP {response.status_code}, Message: {response.text}"
+                )
+                if 400 <= response.status_code < 500 and response.status_code != 429:
+                    raise error
+                raise LineMessagingRetryableError(str(error))
+            except LineMessagingRetryableError as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+            except requests.RequestException as e:
+                last_exception = e
+                if attempt < self.max_retries - 1:
+                    time.sleep(self.retry_delay)
+                    continue
+                raise
+
+        raise last_exception if last_exception else Exception("通知送信失敗")
