@@ -17,6 +17,8 @@ from src.handler import (
     _calculate_weekly_change,
     _check_and_notify_all_tickers,
     _format_notification_message,
+    _download_with_retry,
+    _has_nan_values,
     create_chart,
 )
 from src.s3_storage import CHART_FILENAME
@@ -266,6 +268,53 @@ class TestCreateChartFilename:
         mock_savefig.assert_called_once()
         call_args = mock_savefig.call_args
         assert call_args[0][0] == f"/tmp/{CHART_FILENAME}"
+
+
+class TestDownloadWithRetry:
+    """download_with_retry関数のテストクラス"""
+
+    def test_download_with_retry_retries_when_nan(self):
+        """NaNが含まれる場合にリトライすることを確認"""
+        data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
+        data_without_nan = pd.DataFrame({"Close": [100.0, 101.0]})
+
+        with patch("src.handler.yf.download", side_effect=[data_with_nan, data_without_nan]) as mock_download, \
+            patch("src.handler.time.sleep") as mock_sleep:
+            result = _download_with_retry(
+                tickers="VT",
+                period="1mo",
+                auto_adjust=True,
+                max_attempts=2,
+                retry_interval_seconds=1,
+            )
+
+        assert result.equals(data_without_nan)
+        assert mock_download.call_count == 2
+        mock_sleep.assert_called_once_with(1)
+
+
+class TestHasNanValues:
+    """has_nan_values関数のテストクラス"""
+
+    def test_has_nan_values_single_ticker(self):
+        """単一ティッカーのNaN判定テスト"""
+        data = pd.DataFrame({"Close": [100.0, 101.0]})
+        assert _has_nan_values(data, "VT") is False
+
+        data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
+        assert _has_nan_values(data_with_nan, "VT") is True
+
+    def test_has_nan_values_multi_ticker(self):
+        """複数ティッカーのNaN判定テスト"""
+        vt_data = pd.DataFrame({"Close": [100.0, 101.0]})
+        voo_data = pd.DataFrame({"Close": [200.0, 201.0]})
+        combined = pd.concat({"VT": vt_data, "VOO": voo_data}, axis=1)
+
+        assert _has_nan_values(combined, ["VT", "VOO"]) is False
+
+        voo_data_with_nan = pd.DataFrame({"Close": [200.0, float("nan")]})
+        combined_with_nan = pd.concat({"VT": vt_data, "VOO": voo_data_with_nan}, axis=1)
+        assert _has_nan_values(combined_with_nan, ["VT", "VOO"]) is True
 
 
 class TestS3ImageIntegration:

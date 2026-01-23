@@ -1,5 +1,6 @@
 import datetime
-from typing import Any, Dict, List, TypedDict
+import time
+from typing import Any, Dict, List, Sequence, TypedDict
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -23,7 +24,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     # 基準日
     base_date = datetime.datetime.now().date()
 
-    all_data = yf.download(
+    all_data = _download_with_retry(
         tickers=targets,
         period="1mo",
         group_by="ticker",
@@ -116,7 +117,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     image_url: str | None = None
     # VTの3ヶ月グラフを生成してS3経由で送信
     try:
-        vt_df_6mo = yf.download(tickers="VT", period="6mo", auto_adjust=True)
+        vt_df_6mo = _download_with_retry(tickers="VT", period="6mo", auto_adjust=True)
         chart_filepath = create_chart(vt_df_6mo)
 
         s3_storage = S3Storage()
@@ -162,6 +163,90 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             "message": "Stock monitoring completed successfully",
         },
     }
+
+
+def _download_with_retry(
+    *,
+    tickers: str | Sequence[str],
+    period: str,
+    group_by: str | None = None,
+    end: datetime.date | None = None,
+    auto_adjust: bool = True,
+    max_attempts: int = 3,
+    retry_interval_seconds: int = 2,
+) -> pd.DataFrame:
+    """
+    yfinanceでNaNが混入するケースに備えてリトライする
+
+    Args:
+        tickers: 取得対象のティッカー
+        period: 取得期間
+        group_by: グループ化方法
+        end: 終了日
+        auto_adjust: 自動調整フラグ
+        max_attempts: 最大リトライ回数
+        retry_interval_seconds: リトライ間隔（秒）
+
+    Returns:
+        pd.DataFrame: 取得結果
+    """
+    download_kwargs: Dict[str, Any] = {
+        "tickers": tickers,
+        "period": period,
+        "auto_adjust": auto_adjust,
+    }
+    if group_by:
+        download_kwargs["group_by"] = group_by
+    if end:
+        download_kwargs["end"] = end
+
+    last_data: pd.DataFrame | None = None
+    for attempt in range(1, max_attempts + 1):
+        last_data = yf.download(**download_kwargs)
+        if not _has_nan_values(last_data, tickers):
+            return last_data
+        if attempt < max_attempts:
+            print(
+                "yfinanceからNaNが返却されたため、"
+                f"{retry_interval_seconds}秒後に再試行します。({attempt}/{max_attempts})"
+            )
+            time.sleep(retry_interval_seconds)
+
+    return last_data if last_data is not None else pd.DataFrame()
+
+
+def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
+    """
+    yfinance取得データにNaNが含まれるか判定
+
+    Args:
+        data: 取得した株価データ
+        tickers: 対象ティッカー
+
+    Returns:
+        bool: NaNが含まれる場合True
+    """
+    if data.empty:
+        return True
+
+    if isinstance(tickers, str):
+        try:
+            close_series = data["Close"]
+        except KeyError:
+            return True
+        return bool(close_series.isna().any())
+
+    for ticker in tickers:
+        try:
+            ticker_data = data[ticker]
+        except KeyError:
+            return True
+        if "Close" not in ticker_data.columns:
+            return True
+        if bool(ticker_data["Close"].isna().any()):
+            return True
+
+    return False
 
 
 def _is_market_closed(all_data: pd.DataFrame) -> bool:
