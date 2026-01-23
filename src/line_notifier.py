@@ -7,7 +7,6 @@ from typing import Any, Dict
 import requests
 
 
-
 class LineMessagingRetryableError(Exception):
     """リトライ対象のLINE送信エラー"""
 
@@ -86,9 +85,7 @@ class LineMessagingNotifier:
                 if not isinstance(image_url, str) or not image_url.startswith(
                     "https://"
                 ):
-                    raise ValueError(
-                        f"画像URLはHTTPSである必要があります: {image_url}"
-                    )
+                    raise ValueError(f"画像URLはHTTPSである必要があります: {image_url}")
 
         payload = {"to": self.user_id, "messages": messages}
         resolved_retry_key = retry_key or self.build_retry_key(str(payload))
@@ -125,3 +122,42 @@ class LineMessagingNotifier:
                 raise
 
         raise last_exception if last_exception else Exception("通知送信失敗")
+
+    def send_message(
+        self, message: str, retry_key: str | None = None
+    ) -> Dict[str, Any]:
+        """
+        テキストメッセージを送信
+
+        Args:
+            message (str): 送信するテキスト
+            retry_key (str | None): 冪等性確保用のリトライキー
+
+        Returns:
+            dict: API レスポンス
+        """
+        return self.send_messages([{"type": "text", "text": message}], retry_key)
+
+    def send_image_url(
+        self, image_url: str, retry_key: str | None = None
+    ) -> Dict[str, Any]:
+        """
+        画像URLメッセージを送信
+
+        Args:
+            image_url (str): 送信する画像URL（HTTPS必須）
+            retry_key (str | None): 冪等性確保用のリトライキー
+
+        Returns:
+            dict: API レスポンス
+        """
+        return self.send_messages(
+            [
+                {
+                    "type": "image",
+                    "originalContentUrl": image_url,
+                    "previewImageUrl": image_url,
+                }
+            ],
+            retry_key,
+        )

@@ -16,6 +16,8 @@ class TestLineNotifier:
         # CI環境ではスキップ
         if os.getenv("CI") == "true" or os.getenv("GITHUB_ACTIONS") == "true":
             return
+        if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or not os.getenv("LINE_USER_ID"):
+            pytest.skip("LINE環境変数が未設定のためスキップします。")
 
         line_notifier = LineMessagingNotifier()
 
@@ -56,8 +58,13 @@ class TestLineMessagingNotifierImageUrl:
 
         assert payload["to"] == "test-user"
         assert payload["messages"][0]["type"] == "image"
-        assert payload["messages"][0]["originalContentUrl"] == "https://example.com/image.png"
-        assert payload["messages"][0]["previewImageUrl"] == "https://example.com/image.png"
+        assert (
+            payload["messages"][0]["originalContentUrl"]
+            == "https://example.com/image.png"
+        )
+        assert (
+            payload["messages"][0]["previewImageUrl"] == "https://example.com/image.png"
+        )
 
     @patch.dict(
         os.environ,
