@@ -364,14 +364,13 @@ def _format_notification_message(
         str: 整形されたメッセージ文字列
     """
 
-    alert_message = "📈ETF Price Tracker " + f"{latest_date}\n\n"
-    alert_message += "【為替】\n"
-    alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n\n"
+    alert_message = f"📈{latest_date} ETF Tracker\n\n"
     for ticker in ticker_data_list:
         alert_message += f"【{ticker['name']}】\n"
         alert_message += f"現在値: ${ticker['current_price']:.2f}\n"
         alert_message += f"前日比: {ticker['daily_change']}%\n"
         alert_message += f"前週比: {ticker['weekly_change']}%\n\n"
+    alert_message += "【為替】 " + f"USD/JPY: {usd_jpy_rate:.2f}"
     return alert_message.strip()
 
 
