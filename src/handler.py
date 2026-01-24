@@ -31,7 +31,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         end=base_date,
         auto_adjust=True,
     )
-    print(all_data)
+    # print(all_data)
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
     if _is_market_closed(all_data):

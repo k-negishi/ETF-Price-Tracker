@@ -228,6 +228,8 @@ class TestFormatNotificationMessage:
         result = _format_notification_message(date, ticker_data, usd_jpy_rate)
         expected = (
             "📈ETF Price Tracker 2025-01-01\n\n"
+            "【為替】\n"
+            "USD/JPY: 150.25\n\n"
             "【VT】\n"
             "現在値: $98.75\n"
             "前日比: -2.5%\n"
@@ -239,9 +241,7 @@ class TestFormatNotificationMessage:
             "【QQQ】\n"
             "現在値: $350.45\n"
             "前日比: 0.5%\n"
-            "前週比: -1.2%\n\n"
-            "【為替】\n"
-            "USD/JPY: 150.25"
+            "前週比: -1.2%"
         )
 
         assert result == expected

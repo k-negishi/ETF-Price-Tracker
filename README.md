@@ -88,6 +88,9 @@ AWS Lambda
 
 📈ETF Price Tracker 2025-04-03
 
+【為替】
+USD/JPY: 150.25
+
 【VT】
 現在値: $100.20
 前日比: -3.8%
@@ -103,15 +106,15 @@ AWS Lambda
 前日比: -5.97%
 前週比: -8.5%
 
-【為替】
-USD/JPY: 150.25
-
 ```
 
 例2:
 ```
 
 📈ETF Price Tracker 2020-03-16
+
+【為替】
+USD/JPY: 110.50
 
 【VT】
 現在値: $61.30
@@ -128,7 +131,7 @@ USD/JPY: 150.25
 前日比: -11.7%
 前週比: -15.3%
 
-````
+```
 
 #### 画像通知
 
@@ -257,6 +260,9 @@ Example 1:
 ```
 📈ETF Price Tracker 2025-04-03
 
+【FX】
+USD/JPY: 150.25
+
 【VT】
 Current Price: $100.20
 Day-over-Day Change: -3.8%
@@ -271,15 +277,15 @@ Week-over-Week Change: -10.0%
 Current Price: $352.10
 Day-over-Day Change: -5.97%
 Week-over-Week Change: -8.5%
-
-【FX】
-USD/JPY: 150.25
 ```
 
 Example 2:
 
 ```
 📈ETF Price Tracker 2020-03-16
+
+【FX】
+USD/JPY: 110.50
 
 【VT】
 Current Price: $61.30
