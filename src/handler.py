@@ -45,9 +45,9 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         }
 
     # 各ティッカーのデータを個別の変数に格納
-    vt_data: pd.DataFrame = all_data["VT"]
-    voo_data: pd.DataFrame = all_data["VOO"]
-    qqq_data: pd.DataFrame = all_data["QQQ"]
+    vt_data: pd.DataFrame = all_data["VT"]  # type: ignore[assignment]
+    voo_data: pd.DataFrame = all_data["VOO"]  # type: ignore[assignment]
+    qqq_data: pd.DataFrame = all_data["QQQ"]  # type: ignore[assignment]
 
     # 前日との計算
     vt_daily_change = _calculate_daily_change(vt_data)
@@ -100,13 +100,13 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             },
         }
 
-    # 閾値を下回るETFが1つでも存在する場合、LINE通知を送信
+    # LINE通知の送信
     line_notifier = LineMessagingNotifier()
 
     latest_date = base_date
 
     # JPY=X のデータを取得
-    jpy_data: pd.DataFrame = all_data["JPY=X"]
+    jpy_data: pd.DataFrame = all_data["JPY=X"]  # type: ignore[assignment]
     usd_jpy_rate = jpy_data["Close"].iloc[-1]
 
     message = _format_notification_message(
@@ -135,12 +135,10 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         # 画像生成/送信時の予期しないエラーで再試行されないようにログのみ残す
         print(f"画像通知の送信に失敗しました: {e}")
 
-    text_retry_key = line_notifier.build_retry_key(message)
-    line_notifier.send_messages([{"type": "text", "text": message}], text_retry_key)
+    line_notifier.send_messages([{"type": "text", "text": message}])
 
     if image_url:
         try:
-            image_retry_key = line_notifier.build_retry_key(f"{message}-image")
             line_notifier.send_messages(
                 [
                     {
@@ -148,8 +146,7 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
                         "originalContentUrl": image_url,
                         "previewImageUrl": image_url,
                     }
-                ],
-                image_retry_key,
+                ]
             )
         except Exception as e:
             print(f"画像通知の送信に失敗しました: {e}")
@@ -217,7 +214,7 @@ def _download_with_retry(
 
 def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
     """
-    yfinance取得データにNaNが含まれるか判定
+    yfinance取得データの最新日付（前日）にNaNが含まれるか判定
 
     Args:
         data: 取得した株価データ
@@ -234,16 +231,26 @@ def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
             close_series = data["Close"]
         except KeyError:
             return True
-        return bool(close_series.isna().any())
+        # MultiIndex columnsの場合、DataFrameが返されるため、最初の列を取得
+        if isinstance(close_series, pd.DataFrame):
+            close_series = close_series.iloc[:, 0]
+        close_value = close_series.iloc[-1]
+        return bool(close_value is pd.NA or pd.isna(close_value))
 
     for ticker in tickers:
         try:
             ticker_data = data[ticker]
         except KeyError:
             return True
-        if "Close" not in ticker_data.columns:
-            return True
-        if bool(ticker_data["Close"].isna().any()):
+        # MultiIndex columnsの場合、DataFrameが返される
+        if isinstance(ticker_data, pd.DataFrame):
+            if "Close" not in ticker_data.columns:
+                return True
+            close_price = ticker_data["Close"].iloc[-1]
+        else:
+            # 単一SeriesのClose列の場合
+            close_price = ticker_data.iloc[-1]
+        if pd.isna(close_price):
             return True
 
     return False
@@ -278,8 +285,16 @@ def _calculate_daily_change(stock_data: pd.DataFrame) -> float:
     Returns:
         float: 前日比変動率（%、小数点以下2桁）
     """
-    latest = stock_data["Close"].iloc[-1]
-    previous = stock_data["Close"].iloc[-2]
+    close_col = stock_data["Close"]
+    # MultiIndex columnsの場合、DataFrameが返されるため、最初の列を取得
+    if isinstance(close_col, pd.DataFrame):
+        close_col = close_col.iloc[:, 0]
+    # NaN値を除いた最新2営業日のデータを使用
+    valid_data = close_col.dropna()
+    if len(valid_data) < 2:
+        return 0.0
+    latest = valid_data.iloc[-1]
+    previous = valid_data.iloc[-2]
     change: float = ((latest - previous) / previous) * 100
     return round(change, 2)
 
@@ -294,8 +309,16 @@ def _calculate_weekly_change(stock_data: pd.DataFrame) -> float:
     Returns:
         float: 変動率（%）
     """
-    oldest_price = stock_data["Close"].iloc[-5]
-    current_price = stock_data["Close"].iloc[-1]
+    close_col = stock_data["Close"]
+    # MultiIndex columnsの場合、DataFrameが返されるため、最初の列を取得
+    if isinstance(close_col, pd.DataFrame):
+        close_col = close_col.iloc[:, 0]
+    # NaN値を除いた最新5営業日のデータを使用
+    valid_data = close_col.dropna()
+    if len(valid_data) < 2:
+        return 0.0
+    oldest_price = valid_data.iloc[-5] if len(valid_data) >= 5 else valid_data.iloc[0]
+    current_price = valid_data.iloc[-1]
     change_pct: float = ((current_price - oldest_price) / oldest_price) * 100
     return round(change_pct, 2)
 
@@ -342,14 +365,13 @@ def _format_notification_message(
     """
 
     alert_message = "📈ETF Price Tracker " + f"{latest_date}\n\n"
+    alert_message += "【為替】\n"
+    alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n\n"
     for ticker in ticker_data_list:
         alert_message += f"【{ticker['name']}】\n"
         alert_message += f"現在値: ${ticker['current_price']:.2f}\n"
         alert_message += f"前日比: {ticker['daily_change']}%\n"
         alert_message += f"前週比: {ticker['weekly_change']}%\n\n"
-
-    alert_message += "【為替】\n"
-    alert_message += f"USD/JPY: {usd_jpy_rate:.2f}\n"
     return alert_message.strip()
 
 
@@ -364,7 +386,16 @@ def create_chart(df: pd.DataFrame) -> str:
         str: 保存された画像ファイルのパス
     """
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(df.index, df["Close"], color="#ff9900", linewidth=2)
+    # MultiIndex columnsの場合と通常columnsの場合の両方に対応
+    if isinstance(df.columns, pd.MultiIndex):
+        close_data = (
+            df[("Close", "VT")]
+            if ("Close", "VT") in df.columns
+            else df.iloc[:, df.columns.get_level_values(0) == "Close"].iloc[:, 0]
+        )
+    else:
+        close_data = df["Close"]
+    ax.plot(df.index, close_data, color="#ff9900", linewidth=2)
 
     # グラフのスタイル設定
     ax.set_title("VT - Last 6 Months", fontsize=16)

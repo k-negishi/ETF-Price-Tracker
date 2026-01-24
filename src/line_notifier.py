@@ -1,10 +1,9 @@
-import hashlib
 import os
-from pathlib import Path
 import time
 from typing import Any, Dict
 
 import requests
+from dotenv import find_dotenv, load_dotenv
 
 
 class LineMessagingRetryableError(Exception):
@@ -24,14 +23,7 @@ class LineMessagingNotifier:
         """
         # ローカル実行時のみ .env を読む（本番は環境変数注入）
         if not os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or not os.getenv("LINE_USER_ID"):
-            env_path = Path(".env")
-            if env_path.exists():
-                try:
-                    from dotenv import load_dotenv as load_env_file
-
-                    load_env_file(dotenv_path=env_path)
-                except ImportError:
-                    pass
+            load_dotenv(find_dotenv())
 
         # 環境変数から値を取得
         self.channel_access_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
@@ -53,28 +45,15 @@ class LineMessagingNotifier:
             "User-Agent": "StockAlertBot/2.0",
         }
 
-    @staticmethod
-    def build_retry_key(seed: str) -> str:
-        """
-        冪等性確保用のリトライキーを生成
-
-        Args:
-            seed (str): キー生成に使う文字列
-
-        Returns:
-            str: SHA-256ハッシュ（HEX）
-        """
-        return hashlib.sha256(seed.encode("utf-8")).hexdigest()
-
     def send_messages(
         self, messages: list[Dict[str, Any]], retry_key: str | None = None
     ) -> Dict[str, Any]:
         """
-        LINE通知メッセージを送信（リトライ機能付き）
+        LINE通知メッセージを送信
 
         Args:
             messages (list[dict]): 送信するメッセージ配列
-            retry_key (str | None): 冪等性確保用のリトライキー
+            retry_key (str | None): 冪等性確保用のリトライキー（オプション）
 
         Returns:
             dict: API レスポンス
@@ -88,8 +67,9 @@ class LineMessagingNotifier:
                     raise ValueError(f"画像URLはHTTPSである必要があります: {image_url}")
 
         payload = {"to": self.user_id, "messages": messages}
-        resolved_retry_key = retry_key or self.build_retry_key(str(payload))
-        headers = {**self.headers, "X-Line-Retry-Key": resolved_retry_key}
+        headers = dict(self.headers)
+        if retry_key:
+            headers["X-Line-Retry-Key"] = retry_key
         last_exception: Exception | None = None
 
         for attempt in range(self.max_retries):

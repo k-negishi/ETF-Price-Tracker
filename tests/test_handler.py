@@ -296,25 +296,44 @@ class TestDownloadWithRetry:
 class TestHasNanValues:
     """has_nan_values関数のテストクラス"""
 
-    def test_has_nan_values_single_ticker(self):
-        """単一ティッカーのNaN判定テスト"""
+    def test_has_nan_values_single_ticker_no_nan(self):
+        """単一ティッカーで最新行にNaNがない場合のテスト"""
         data = pd.DataFrame({"Close": [100.0, 101.0]})
         assert _has_nan_values(data, "VT") is False
 
+    def test_has_nan_values_single_ticker_with_nan_in_latest(self):
+        """単一ティッカーで最新行にNaNがある場合のテスト"""
         data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
         assert _has_nan_values(data_with_nan, "VT") is True
 
-    def test_has_nan_values_multi_ticker(self):
-        """複数ティッカーのNaN判定テスト"""
+    def test_has_nan_values_single_ticker_with_nan_in_past(self):
+        """単一ティッカーで過去行にNaNがあるが最新行はOKの場合のテスト"""
+        # 過去データにNaNがあっても最新行がOKならFalseを返す
+        data = pd.DataFrame({"Close": [float("nan"), 100.0, 101.0]})
+        assert _has_nan_values(data, "VT") is False
+
+    def test_has_nan_values_multi_ticker_no_nan(self):
+        """複数ティッカーで全てOKの場合のテスト"""
         vt_data = pd.DataFrame({"Close": [100.0, 101.0]})
         voo_data = pd.DataFrame({"Close": [200.0, 201.0]})
         combined = pd.concat({"VT": vt_data, "VOO": voo_data}, axis=1)
 
         assert _has_nan_values(combined, ["VT", "VOO"]) is False
 
+    def test_has_nan_values_multi_ticker_with_nan_in_latest(self):
+        """複数ティッカーで最新行にNaNがある場合のテスト"""
+        vt_data = pd.DataFrame({"Close": [100.0, 101.0]})
         voo_data_with_nan = pd.DataFrame({"Close": [200.0, float("nan")]})
         combined_with_nan = pd.concat({"VT": vt_data, "VOO": voo_data_with_nan}, axis=1)
         assert _has_nan_values(combined_with_nan, ["VT", "VOO"]) is True
+
+    def test_has_nan_values_multi_ticker_with_nan_in_past(self):
+        """複数ティッカーで過去行にNaNがあるが最新行はOKの場合のテスト"""
+        # 過去データにNaNがあっても最新行がOKならFalseを返す
+        vt_data = pd.DataFrame({"Close": [float("nan"), 100.0, 101.0]})
+        voo_data = pd.DataFrame({"Close": [200.0, 201.0, 202.0]})
+        combined = pd.concat({"VT": vt_data, "VOO": voo_data}, axis=1)
+        assert _has_nan_values(combined, ["VT", "VOO"]) is False
 
 
 class TestS3ImageIntegration:
