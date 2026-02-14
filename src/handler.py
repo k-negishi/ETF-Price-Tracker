@@ -1,4 +1,5 @@
 import datetime
+import os
 import time
 from typing import Any, Dict, List, Sequence, TypedDict
 
@@ -120,11 +121,30 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
         vt_df_6mo = _download_with_retry(tickers="VT", period="6mo", auto_adjust=True)
         chart_filepath = create_chart(vt_df_6mo)
 
+        # ファイルサイズを確認してログ出力
+        file_size_bytes = os.path.getsize(chart_filepath)
+        file_size_mb = file_size_bytes / (1024 * 1024)
+        print(
+            f"チャート画像生成完了: {chart_filepath}, "
+            f"サイズ: {file_size_bytes} bytes ({file_size_mb:.2f} MB)"
+        )
+
+        # LINE API画像サイズ制限チェック (10MB)
+        if file_size_bytes > 10 * 1024 * 1024:
+            print("警告: 画像サイズがLINE API制限 (10MB) を超えています")
+
         s3_storage = S3Storage()
         now = datetime.datetime.now()
+        # presigned URL有効期限を24時間 (86400秒) に設定
         image_url = s3_storage.upload_and_get_url(
-            filepath=chart_filepath, filename_hint=CHART_FILENAME, now=now
+            filepath=chart_filepath,
+            filename_hint=CHART_FILENAME,
+            now=now,
+            expires_in=86400,
         )
+        print(
+            f"presigned URL生成成功: {image_url[:100]}..."
+        )  # URLの先頭100文字のみログ出力
     except S3StorageError as e:
         # S3エラーはログに記録するが、テキスト通知はこの後送信するため処理は継続
         print(f"S3アップロードエラー: {e}")
@@ -148,8 +168,14 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
                     }
                 ]
             )
+            print("LINE画像送信成功")
         except Exception as e:
-            print(f"画像通知の送信に失敗しました: {e}")
+            # エラーの詳細情報をログ出力
+            print(
+                f"LINE画像送信失敗: エラータイプ={type(e).__name__}, "
+                f"メッセージ={str(e)}, "
+                f"URL={image_url[:100]}..."
+            )
 
     # Lambda用のレスポンス
     return {
@@ -405,8 +431,9 @@ def create_chart(df: pd.DataFrame) -> str:
     plt.grid(True, linestyle="--", alpha=0.6)
 
     # ファイルに保存（ファイル名は定数CHART_FILENAMEを使用）
+    # dpi=80に設定して画像サイズを最適化 (LINE推奨1MB以下、最大10MB)
     filepath = f"/tmp/{CHART_FILENAME}"
-    plt.savefig(filepath, bbox_inches="tight")
+    plt.savefig(filepath, bbox_inches="tight", dpi=80)
     plt.close(fig)
 
     return filepath

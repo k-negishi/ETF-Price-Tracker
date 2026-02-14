@@ -116,7 +116,7 @@ class S3Storage:
             raise S3StorageError(f"予期しないエラーが発生しました: {str(e)}") from e
 
     def upload_and_get_url(
-        self, filepath: str, filename_hint: str, now: datetime
+        self, filepath: str, filename_hint: str, now: datetime, expires_in: int = 3600
     ) -> str:
         """
         ファイルをS3にアップロードしてpresigned URLを返す
@@ -125,6 +125,7 @@ class S3Storage:
             filepath: ローカルファイルパス
             filename_hint: ファイル名のヒント（S3キー生成に使用）
             now: 現在日時（S3キー生成に使用）
+            expires_in: presigned URL有効期限（秒）、デフォルト3600秒
 
         Returns:
             str: presigned URL
@@ -139,4 +140,4 @@ class S3Storage:
         self.upload_file(filepath, s3_key)
 
         # presigned URLを生成して返す
-        return self.create_presigned_url(s3_key)
+        return self.create_presigned_url(s3_key, expires_in=expires_in)
