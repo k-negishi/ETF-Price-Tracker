@@ -29,7 +29,9 @@ class TestS3Storage:
     def test_init_without_bucket_raises_error(self):
         """バケット名が未設定の場合エラー"""
         with patch.dict(os.environ, {}, clear=True):
-            with pytest.raises(ValueError, match="環境変数S3_BUCKETが設定されていません"):
+            with pytest.raises(
+                ValueError, match="環境変数S3_BUCKETが設定されていません"
+            ):
                 S3Storage()
 
     def test_build_s3_key(self):
@@ -110,9 +112,7 @@ class TestS3Storage:
     def test_create_presigned_url_success(self, mock_boto_client):
         """presigned URL生成成功のテスト"""
         mock_s3 = Mock()
-        mock_s3.generate_presigned_url.return_value = (
-            "https://s3.amazonaws.com/test-bucket/charts/2026/01/12/test.png?signature=xxx"
-        )
+        mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/test-bucket/charts/2026/01/12/test.png?signature=xxx"
         mock_boto_client.return_value = mock_s3
 
         storage = S3Storage(bucket_name="test-bucket")
@@ -146,7 +146,12 @@ class TestS3Storage:
         """presigned URL生成時のClientError"""
         mock_s3 = Mock()
         mock_s3.generate_presigned_url.side_effect = ClientError(
-            {"Error": {"Code": "NoSuchKey", "Message": "The specified key does not exist"}},
+            {
+                "Error": {
+                    "Code": "NoSuchKey",
+                    "Message": "The specified key does not exist",
+                }
+            },
             "GetObject",
         )
         mock_boto_client.return_value = mock_s3
@@ -160,9 +165,7 @@ class TestS3Storage:
     def test_upload_and_get_url_success(self, mock_boto_client):
         """アップロードとURL取得の統合テスト"""
         mock_s3 = Mock()
-        mock_s3.generate_presigned_url.return_value = (
-            "https://s3.amazonaws.com/test-bucket/charts/2026/01/12/vt_chart.png?sig=xxx"
-        )
+        mock_s3.generate_presigned_url.return_value = "https://s3.amazonaws.com/test-bucket/charts/2026/01/12/vt_chart.png?sig=xxx"
         mock_boto_client.return_value = mock_s3
 
         storage = S3Storage(bucket_name="test-bucket")

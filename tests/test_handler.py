@@ -16,6 +16,7 @@ from src.handler import (
     _calculate_daily_change,
     _calculate_weekly_change,
     _check_and_notify_all_tickers,
+    _format_market_closed_message,
     _format_notification_message,
     _download_with_retry,
     _has_nan_values,
@@ -50,27 +51,33 @@ class TestCalculateDailyChange:
     def test_calculate_daily_change_positive(self):
         """前日比プラスの場合のテスト"""
         # テストデータ作成
-        test_data = pd.DataFrame({
-            'Close': [100.0, 105.0]  # 5%の上昇
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 105.0]  # 5%の上昇
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == 5.0
 
     def test_calculate_daily_change_negative(self):
         """前日比マイナスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 97.0]  # 3%の下落
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 97.0]  # 3%の下落
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == -3.0
 
     def test_calculate_daily_change_no_change(self):
         """前日比変化なしの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 100.0]  # 変化なし
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 100.0]  # 変化なし
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == 0.0
@@ -81,30 +88,37 @@ class TestCalculateWeeklyChange:
 
     def test_calculate_weekly_change_positive(self):
         """1週間前比プラスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 102.0, 104.0, 103.0, 110.0]  # 10%の上昇
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 102.0, 104.0, 103.0, 110.0]  # 10%の上昇
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == 10.0
 
     def test_calculate_weekly_change_negative(self):
         """1週間前比マイナスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 98.0, 96.0, 94.0, 90.0]  # 10%の下落
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 98.0, 96.0, 94.0, 90.0]  # 10%の下落
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == -10.0
 
     def test_calculate_weekly_change_no_change(self):
         """1週間前比変化なしの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 102.0, 98.0, 105.0, 100.0]  # 変化なし
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 102.0, 98.0, 105.0, 100.0]  # 変化なし
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == 0.0
+
 
 class TestCheckAndNotifyAllTickers:
     """check_and_notify_all_tickers関数のテストクラス"""
@@ -113,17 +127,17 @@ class TestCheckAndNotifyAllTickers:
         """アラートが不要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -3.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -3.0,  # 閾値内
+                "current_price": 100.0,
             },
             {
-                'name': 'VOO',
-                'daily_change': 1.0,   # プラス
-                'weekly_change': -2.0,  # 閾値内
-                'current_price': 200.0
-            }
+                "name": "VOO",
+                "daily_change": 1.0,  # プラス
+                "weekly_change": -2.0,  # 閾値内
+                "current_price": 200.0,
+            },
         ]
 
         result = _check_and_notify_all_tickers(ticker_data, -2.0, -5.0)
@@ -133,10 +147,10 @@ class TestCheckAndNotifyAllTickers:
         """日次アラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -1.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -1.0,  # 閾値内
+                "current_price": 100.0,
             }
         ]
 
@@ -147,10 +161,10 @@ class TestCheckAndNotifyAllTickers:
         """週次アラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VOO',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -6.0,  # 閾値を下回る
-                'current_price': 200.0
+                "name": "VOO",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -6.0,  # 閾値を下回る
+                "current_price": 200.0,
             }
         ]
 
@@ -161,10 +175,10 @@ class TestCheckAndNotifyAllTickers:
         """両方のアラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'QQQ',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -7.0,  # 閾値を下回る
-                'current_price': 300.0
+                "name": "QQQ",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -7.0,  # 閾値を下回る
+                "current_price": 300.0,
             }
         ]
 
@@ -175,27 +189,28 @@ class TestCheckAndNotifyAllTickers:
         """複数銘柄で一部がアラート対象の場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -3.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -3.0,  # 閾値内
+                "current_price": 100.0,
             },
             {
-                'name': 'VOO',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -2.0,  # 閾値内
-                'current_price': 200.0
+                "name": "VOO",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -2.0,  # 閾値内
+                "current_price": 200.0,
             },
             {
-                'name': 'QQQ',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -6.0,  # 閾値を下回る
-                'current_price': 300.0
-            }
+                "name": "QQQ",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -6.0,  # 閾値を下回る
+                "current_price": 300.0,
+            },
         ]
 
         result = _check_and_notify_all_tickers(ticker_data, -2.0, -5.0)
         assert result is True
+
 
 class TestFormatNotificationMessage:
     """format_notification_message関数のテストクラス"""
@@ -253,9 +268,10 @@ class TestCreateChartFilename:
     @patch("matplotlib.pyplot.close")
     def test_create_chart_uses_constant_filename(self, mock_close, mock_savefig):
         """create_chart関数がCHART_FILENAME定数を使用することを確認"""
-        test_data = pd.DataFrame({
-            "Close": [100.0 + i for i in range(30)]
-        }, index=pd.date_range("2025-12-01", periods=30))
+        test_data = pd.DataFrame(
+            {"Close": [100.0 + i for i in range(30)]},
+            index=pd.date_range("2025-12-01", periods=30),
+        )
 
         filepath = create_chart(test_data)
 
@@ -277,8 +293,12 @@ class TestDownloadWithRetry:
         data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
         data_without_nan = pd.DataFrame({"Close": [100.0, 101.0]})
 
-        with patch("src.handler.yf.download", side_effect=[data_with_nan, data_without_nan]) as mock_download, \
-            patch("src.handler.time.sleep") as mock_sleep:
+        with (
+            patch(
+                "src.handler.yf.download", side_effect=[data_with_nan, data_without_nan]
+            ) as mock_download,
+            patch("src.handler.time.sleep") as mock_sleep,
+        ):
             result = _download_with_retry(
                 tickers="VT",
                 period="1mo",
@@ -356,10 +376,107 @@ class TestS3ImageIntegration:
         # テストケース
         storage = S3Storage()
         url = storage.upload_and_get_url(
-            filepath="/tmp/vt_chart.png", filename_hint=CHART_FILENAME, now=datetime.now()
+            filepath="/tmp/vt_chart.png",
+            filename_hint=CHART_FILENAME,
+            now=datetime.now(),
         )
 
         assert url is not None
+
+
+class TestFormatMarketClosedMessage:
+    """_format_market_closed_message関数のテストクラス"""
+
+    def test_format_market_closed_message(self):
+        """データ取得不可メッセージのフォーマットテスト"""
+        from datetime import date
+
+        result = _format_market_closed_message(date(2026, 2, 17))
+        assert "2026-02-17" in result
+        assert "ETF Tracker" in result
+        assert "取得できませんでした" in result
+
+    def test_format_market_closed_message_contains_emoji(self):
+        """データ取得不可メッセージに絵文字が含まれることを確認"""
+        from datetime import date
+
+        result = _format_market_closed_message(date(2026, 1, 20))
+        assert result.startswith("📈")
+
+
+class TestHolidayDetectionInLambdaHandler:
+    """lambda_handlerにおける祝日検知のテストクラス"""
+
+    @patch("src.handler.LineMessagingNotifier")
+    @patch("src.handler._is_market_closed", return_value=False)
+    @patch("src.handler._download_with_retry")
+    def test_lambda_handler_sends_holiday_message_on_nan(
+        self, mock_download, mock_market_closed, mock_line_class
+    ):
+        """ETFデータにNaNが含まれる場合、祝日メッセージを送信することを確認"""
+        # JPY=Xは正常だがETFがNaNのデータを作成
+        vt_data = pd.DataFrame({"Close": [100.0, float("nan")]})
+        voo_data = pd.DataFrame({"Close": [200.0, float("nan")]})
+        qqq_data = pd.DataFrame({"Close": [300.0, float("nan")]})
+        jpy_data = pd.DataFrame({"Close": [150.0, 152.78]})
+        combined = pd.concat(
+            {"VT": vt_data, "VOO": voo_data, "QQQ": qqq_data, "JPY=X": jpy_data},
+            axis=1,
+        )
+        # indexに日付を設定
+        yesterday = datetime.now().date() - pd.Timedelta(days=1)
+        combined.index = pd.to_datetime([yesterday - pd.Timedelta(days=1), yesterday])
+        mock_download.return_value = combined
+
+        mock_line_instance = Mock()
+        mock_line_class.return_value = mock_line_instance
+
+        from src.handler import lambda_handler
+
+        result = lambda_handler({}, MagicMock())
+
+        assert result["statusCode"] == 200
+        assert result["body"]["notification_sent"] is True
+        assert "NaN" in result["body"]["message"]
+
+        # LINE通知が1回呼ばれたことを確認
+        mock_line_instance.send_messages.assert_called_once()
+        sent_message = mock_line_instance.send_messages.call_args[0][0][0]
+        assert sent_message["type"] == "text"
+        assert "取得できませんでした" in sent_message["text"]
+
+    @patch("src.handler.LineMessagingNotifier")
+    @patch("src.handler._is_market_closed", return_value=False)
+    @patch("src.handler._download_with_retry")
+    def test_lambda_handler_proceeds_normally_without_nan(
+        self, mock_download, mock_market_closed, mock_line_class
+    ):
+        """ETFデータにNaNがない場合、通常処理が行われることを確認"""
+        vt_data = pd.DataFrame({"Close": [100.0, 101.0]})
+        voo_data = pd.DataFrame({"Close": [200.0, 201.0]})
+        qqq_data = pd.DataFrame({"Close": [300.0, 301.0]})
+        jpy_data = pd.DataFrame({"Close": [150.0, 152.78]})
+        combined = pd.concat(
+            {"VT": vt_data, "VOO": voo_data, "QQQ": qqq_data, "JPY=X": jpy_data},
+            axis=1,
+        )
+        yesterday = datetime.now().date() - pd.Timedelta(days=1)
+        combined.index = pd.to_datetime([yesterday - pd.Timedelta(days=1), yesterday])
+        mock_download.return_value = combined
+
+        mock_line_instance = Mock()
+        mock_line_class.return_value = mock_line_instance
+
+        from src.handler import lambda_handler
+
+        result = lambda_handler({}, MagicMock())
+
+        assert result["statusCode"] == 200
+        assert result["body"]["notification_sent"] is True
+        # 通常メッセージが送信されたことを確認（データ取得不可メッセージではない）
+        sent_message = mock_line_instance.send_messages.call_args[0][0][0]
+        assert "取得できませんでした" not in sent_message["text"]
+        assert "現在値" in sent_message["text"]
 
 
 if __name__ == "__main__":

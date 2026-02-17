@@ -45,6 +45,24 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             },
         }
 
+    # リトライ後もETFデータにNaNが残っている場合は休場日または取得エラーと判断
+    if _has_nan_values(all_data, targets):
+        print(
+            "リトライ後もETFデータにNaNが含まれるため、"
+            "米国市場の休場日またはデータ取得エラーと判断しました"
+        )
+        holiday_message = _format_market_closed_message(base_date)
+        line_notifier = LineMessagingNotifier()
+        line_notifier.send_messages([{"type": "text", "text": holiday_message}])
+        return {
+            "statusCode": 200,
+            "body": {
+                "notification_sent": True,
+                "ticker_count": 0,
+                "message": "ETF data unavailable (NaN after retries)",
+            },
+        }
+
     # 各ティッカーのデータを個別の変数に格納
     vt_data: pd.DataFrame = all_data["VT"]  # type: ignore[assignment]
     voo_data: pd.DataFrame = all_data["VOO"]  # type: ignore[assignment]
@@ -369,6 +387,25 @@ def _check_and_notify_all_tickers(
         _is_below_threshold(ticker["daily_change"], daily_threshold)
         or _is_below_threshold(ticker["weekly_change"], weekly_threshold)
         for ticker in ticker_data_list
+    )
+
+
+def _format_market_closed_message(date: datetime.date) -> str:
+    """
+    ETF価格データが取得できなかった場合のLINE通知メッセージを整形
+
+    米国市場の祝日休場、またはデータ取得エラーの場合に使用
+
+    Args:
+        date: 基準日
+
+    Returns:
+        str: 整形されたメッセージ文字列
+    """
+    return (
+        f"📈{date} ETF Tracker\n\n"
+        "本日はETF価格データを取得できませんでした。\n"
+        "米国市場の休場日(祝日)の可能性があります。"
     )
 
 
