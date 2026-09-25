@@ -329,6 +329,31 @@ class TestDownloadWithRetry:
                     retry_interval_seconds=0,
                 )
 
+    def test_download_with_retry_logs_and_retries_exceptions(self, capsys):
+        """一括取得例外の内容を記録してリトライすることを確認"""
+        valid = pd.DataFrame({"Close": [101.0]})
+
+        with (
+            patch(
+                "src.handler.yf.download",
+                side_effect=[RuntimeError("temporary failure"), valid],
+            ),
+            patch("src.handler.time.sleep") as mock_sleep,
+        ):
+            result = _download_with_retry(
+                tickers="VT",
+                period="1mo",
+                max_attempts=2,
+                retry_interval_seconds=1,
+            )
+
+        assert result.equals(valid)
+        mock_sleep.assert_called_once_with(1)
+        captured = capsys.readouterr().out
+        assert "yfinance一括取得例外" in captured
+        assert "error_type=RuntimeError" in captured
+        assert "error=temporary failure" in captured
+
     def test_download_falls_back_to_unadjusted_close(self):
         """調整後終値が欠損した場合に通常終値を採用することを確認"""
         index = pd.to_datetime(["2026-09-23", "2026-09-24"])
@@ -371,12 +396,13 @@ class TestDownloadWithRetry:
 
         assert result["Close"].iloc[-1] == 101.0
 
-    def test_download_fills_missing_close_from_fast_info(self):
-        """日足の行だけ先に生成された場合は市場価格メタデータで補完する"""
+    def test_download_falls_back_to_individual_dated_history(self, capsys):
+        """一括取得が欠損した場合は日付付きの個別日足を採用する"""
         index = pd.to_datetime(["2026-09-23", "2026-09-24"])
         missing = pd.DataFrame({"Close": [100.0, float("nan")]}, index=index)
         ticker = Mock()
-        ticker.fast_info.last_price = 101.0
+        individual = pd.DataFrame({"Close": [100.0, 101.0]}, index=index)
+        ticker.history.return_value = individual
 
         with (
             patch("src.handler.yf.download", return_value=missing),
@@ -391,6 +417,81 @@ class TestDownloadWithRetry:
             )
 
         assert result["Close"].iloc[-1] == 101.0
+        ticker.history.assert_called_once_with(
+            period="1mo",
+            end=datetime(2026, 9, 25).date(),
+            auto_adjust=False,
+            actions=False,
+            raise_errors=True,
+        )
+        captured = capsys.readouterr().out
+        assert "市場データ採用: source=individual_raw" in captured
+        assert "expected_date=2026-09-24" in captured
+
+    def test_download_rejects_individual_history_for_a_different_date(self):
+        """個別取得でも基準日が一致しなければ過去価格を採用しない"""
+        missing = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        older = pd.DataFrame({"Close": [100.0]}, index=pd.to_datetime(["2026-09-23"]))
+        ticker = Mock()
+        ticker.history.return_value = older
+
+        with (
+            patch("src.handler.yf.download", return_value=missing),
+            patch("src.handler.yf.Ticker", return_value=ticker),
+            patch("src.handler.time.sleep"),
+        ):
+            with pytest.raises(MarketDataUnavailableError):
+                _download_prices_with_fallback(
+                    tickers="VT",
+                    period="1mo",
+                    end=datetime(2026, 9, 25).date(),
+                    expected_price_date=datetime(2026, 9, 24).date(),
+                )
+
+        assert ticker.history.call_count == 3
+
+    def test_individual_fallback_returns_common_dated_multi_ticker_data(self):
+        """3銘柄の個別日足が揃った場合だけ共通形式で返すことを確認"""
+        index = pd.to_datetime(["2026-09-16", "2026-09-17", "2026-09-23", "2026-09-24"])
+        histories = {
+            "VT": pd.DataFrame({"Close": [100.0, 101.0, 109.0, 110.0]}, index=index),
+            "VOO": pd.DataFrame({"Close": [200.0, 202.0, 218.0, 220.0]}, index=index),
+            "QQQ": pd.DataFrame({"Close": [300.0, 303.0, 327.0, 330.0]}, index=index),
+        }
+        missing = pd.concat(
+            {
+                ticker: history.assign(Close=float("nan"))
+                for ticker, history in histories.items()
+            },
+            axis=1,
+        )
+
+        def ticker_factory(symbol):
+            ticker = Mock()
+            ticker.history.return_value = histories[symbol]
+            return ticker
+
+        with (
+            patch("src.handler.yf.download", return_value=missing),
+            patch("src.handler.yf.Ticker", side_effect=ticker_factory),
+            patch("src.handler.time.sleep"),
+        ):
+            result = _download_prices_with_fallback(
+                tickers=("VT", "VOO", "QQQ"),
+                period="1mo",
+                group_by="ticker",
+                end=datetime(2026, 9, 25).date(),
+                expected_price_date=datetime(2026, 9, 24).date(),
+            )
+
+        price_date, ticker_data = _build_ticker_data(
+            result, ("VT", "VOO", "QQQ"), datetime(2026, 9, 24).date()
+        )
+        assert price_date == datetime(2026, 9, 24).date()
+        assert [item["current_price"] for item in ticker_data] == [110.0, 220.0, 330.0]
 
 
 class TestBuildTickerData:

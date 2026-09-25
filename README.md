@@ -48,7 +48,7 @@ AWS Lambda
 
 2. **データ取得**
 
-   yfinanceを使用し、3つのETFとUSD/JPY為替レートを別々に取得。ETFは調整後終値、通常終値、`fast_info.last_price`の順でフォールバック
+   yfinanceを使用し、3つのETFとUSD/JPY為替レートを別々に取得。ETFは一括の調整後日足、一括の通常日足、銘柄ごとの通常日足の順でフォールバック
 
 3. **価格検証・変動率計算**
 
@@ -226,7 +226,7 @@ AWS Lambda
    Executes the Lambda function every Tuesday through Saturday at 9:15 AM JST (00:15 UTC, 8:15 PM on the previous day in New York during daylight saving time, and 7:15 PM during standard time).
 
 2. **Data Retrieval**
-   Retrieves the three ETFs separately from the USD/JPY exchange rate using yfinance. ETF retrieval falls back from adjusted close to unadjusted close and then to `fast_info.last_price`.
+   Retrieves the three ETFs separately from the USD/JPY exchange rate using yfinance. ETF retrieval falls back from batch adjusted daily data to batch unadjusted daily data and then to per-symbol unadjusted daily data.
 
 3. **Price Validation and Change Calculation**
    Calculates the current price, day-over-day change, and week-over-week change from common trading dates only when all three ETFs have a valid price for the target date. The notification heading shows the ETF price date; if the values are incomplete, the function exits without sending `NaN`.
