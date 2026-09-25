@@ -1,5 +1,5 @@
-name: ETF Price Tracker CI/CD
-run-name: ${{ github.event_name == 'pull_request' && 'CI (no deploy)' || 'CI and deploy' }}
+name: ETF Price Tracker
+run-name: ${{ github.event_name == 'pull_request' && 'ETF Price Tracker CI' || 'ETF Price Tracker CI/CD' }}
 
 on:
   push:
