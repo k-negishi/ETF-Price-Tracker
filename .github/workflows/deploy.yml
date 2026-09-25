@@ -1,7 +1,10 @@
-name: Deploy ETF Price Tracker
+name: ETF Price Tracker
+run-name: ${{ github.event_name == 'pull_request' && 'ETF Price Tracker CI' || 'ETF Price Tracker CI/CD' }}
 
 on:
   push:
+    branches: [ main ]
+  pull_request:
     branches: [ main ]
   workflow_dispatch:
 
@@ -92,6 +95,7 @@ jobs:
         run: python -m pytest tests/ -v
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: [lint, format, type-check, test]
     runs-on: ubuntu-latest
     steps:

@@ -1,4 +1,5 @@
 import datetime
+import math
 import os
 import time
 from typing import Any, Dict, List, Sequence, TypedDict
@@ -12,6 +13,16 @@ from aws_lambda_powertools.utilities.typing import LambdaContext
 from src.line_notifier import LineMessagingNotifier
 from src.s3_storage import CHART_FILENAME, S3Storage, S3StorageError
 
+ETF_TICKERS = ("VT", "VOO", "QQQ")
+
+
+class MarketDataUnavailableError(RuntimeError):
+    """通知に利用できる価格をyfinanceから取得できなかった。"""
+
+    def __init__(self, message: str, data: pd.DataFrame | None = None) -> None:
+        super().__init__(message)
+        self.data = data if data is not None else pd.DataFrame()
+
 
 class TickerData(TypedDict):
     name: str
@@ -21,21 +32,31 @@ class TickerData(TypedDict):
 
 
 def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, Any]:
-    targets = ["VT", "VOO", "QQQ", "JPY=X"]
     # 基準日
     base_date = datetime.datetime.now().date()
+    expected_price_date = base_date - datetime.timedelta(days=1)
 
-    all_data = _download_with_retry(
-        tickers=targets,
-        period="1mo",
-        group_by="ticker",
-        end=base_date,
-        auto_adjust=True,
-    )
-    # print(all_data)
+    try:
+        all_data = _download_prices_with_fallback(
+            tickers=ETF_TICKERS,
+            period="1mo",
+            group_by="ticker",
+            end=base_date,
+            expected_price_date=expected_price_date,
+        )
+    except MarketDataUnavailableError as e:
+        print(f"ETF価格取得失敗: {e}")
+        return {
+            "statusCode": 503,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": 0,
+                "message": "ETF prices are not available",
+            },
+        }
 
     # 直近の日付が現在日付-1ではない場合は、処理をスキップ(米国市場の休場日を判定)
-    if _is_market_closed(all_data):
+    if _is_market_closed(all_data, expected_price_date):
         return {
             "statusCode": 200,
             "body": {
@@ -45,46 +66,20 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
             },
         }
 
-    # 各ティッカーのデータを個別の変数に格納
-    vt_data: pd.DataFrame = all_data["VT"]  # type: ignore[assignment]
-    voo_data: pd.DataFrame = all_data["VOO"]  # type: ignore[assignment]
-    qqq_data: pd.DataFrame = all_data["QQQ"]  # type: ignore[assignment]
-
-    # 前日との計算
-    vt_daily_change = _calculate_daily_change(vt_data)
-    voo_daily_change = _calculate_daily_change(voo_data)
-    qqq_daily_change = _calculate_daily_change(qqq_data)
-
-    # 1週間前との計算
-    vt_1wk_change = _calculate_weekly_change(vt_data)
-    voo_1wk_change = _calculate_weekly_change(voo_data)
-    qqq_1wk_change = _calculate_weekly_change(qqq_data)
-
-    # 閾値の設定
-    # TODO パイロット用にコメントアウトしたが、もうこのままでいいかも
-    # DAILY_THRESHOLD = -2.0
-    # WEEKLY_THRESHOLD = -5.0
-
-    ticker_data_for_check: List[TickerData] = [
-        {
-            "name": "VT",
-            "daily_change": vt_daily_change,
-            "weekly_change": vt_1wk_change,
-            "current_price": vt_data["Close"].iloc[-1],
-        },
-        {
-            "name": "VOO",
-            "daily_change": voo_daily_change,
-            "weekly_change": voo_1wk_change,
-            "current_price": voo_data["Close"].iloc[-1],
-        },
-        {
-            "name": "QQQ",
-            "daily_change": qqq_daily_change,
-            "weekly_change": qqq_1wk_change,
-            "current_price": qqq_data["Close"].iloc[-1],
-        },
-    ]
+    try:
+        price_date, ticker_data_for_check = _build_ticker_data(
+            all_data, ETF_TICKERS, expected_price_date
+        )
+    except MarketDataUnavailableError as e:
+        print(f"ETF価格検証失敗: {e}")
+        return {
+            "statusCode": 503,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": 0,
+                "message": "ETF prices failed validation",
+            },
+        }
 
     # TODO パイロット用にコメントアウトしたけど、便利だしこのままでいいかも。
     # notification_needed = check_and_notify_all_tickers(ticker_data_for_check, DAILY_THRESHOLD, WEEKLY_THRESHOLD)
@@ -104,21 +99,40 @@ def lambda_handler(event: Dict[str, Any], context: LambdaContext) -> Dict[str, A
     # LINE通知の送信
     line_notifier = LineMessagingNotifier()
 
-    latest_date = base_date
-
-    # JPY=X のデータを取得
-    jpy_data: pd.DataFrame = all_data["JPY=X"]  # type: ignore[assignment]
-    usd_jpy_rate = jpy_data["Close"].iloc[-1]
+    # ETFと取引時間が異なる為替は別に取得する
+    try:
+        jpy_data = _download_prices_with_fallback(
+            tickers="JPY=X",
+            period="1mo",
+            end=base_date,
+            expected_price_date=expected_price_date,
+        )
+        usd_jpy_rate = _price_on_date(jpy_data, expected_price_date)
+    except MarketDataUnavailableError as e:
+        print(f"為替取得失敗: {e}")
+        return {
+            "statusCode": 503,
+            "body": {
+                "notification_sent": False,
+                "ticker_count": len(ticker_data_for_check),
+                "message": "USD/JPY rate is not available",
+            },
+        }
 
     message = _format_notification_message(
-        latest_date=latest_date,
+        latest_date=price_date,
         ticker_data_list=ticker_data_for_check,
         usd_jpy_rate=usd_jpy_rate,
     )
     image_url: str | None = None
     # VTの3ヶ月グラフを生成してS3経由で送信
     try:
-        vt_df_6mo = _download_with_retry(tickers="VT", period="6mo", auto_adjust=True)
+        vt_df_6mo = _download_prices_with_fallback(
+            tickers="VT",
+            period="6mo",
+            end=base_date,
+            expected_price_date=expected_price_date,
+        )
         chart_filepath = create_chart(vt_df_6mo)
 
         # ファイルサイズを確認してログ出力
@@ -210,8 +224,8 @@ def _download_with_retry(
         max_attempts: 最大リトライ回数
         retry_interval_seconds: リトライ間隔（秒）
 
-    Returns:
-        pd.DataFrame: 取得結果
+    Raises:
+        MarketDataUnavailableError: 最大試行後も最新終値が利用できない場合
     """
     download_kwargs: Dict[str, Any] = {
         "tickers": tickers,
@@ -225,7 +239,8 @@ def _download_with_retry(
 
     last_data: pd.DataFrame | None = None
     for attempt in range(1, max_attempts + 1):
-        last_data = yf.download(**download_kwargs)
+        last_data = yf.download(**download_kwargs, progress=False)
+        _log_latest_prices(last_data, tickers, attempt, auto_adjust)
         if not _has_nan_values(last_data, tickers):
             return last_data
         if attempt < max_attempts:
@@ -235,7 +250,156 @@ def _download_with_retry(
             )
             time.sleep(retry_interval_seconds)
 
-    return last_data if last_data is not None else pd.DataFrame()
+    raise MarketDataUnavailableError(
+        f"{tickers}: {max_attempts}回試行後も最新終値を取得できませんでした "
+        f"(auto_adjust={auto_adjust})",
+        last_data,
+    )
+
+
+def _download_prices_with_fallback(
+    *,
+    tickers: str | Sequence[str],
+    period: str,
+    expected_price_date: datetime.date,
+    group_by: str | None = None,
+    end: datetime.date | None = None,
+) -> pd.DataFrame:
+    """調整後終値、通常終値、Yahooの現在値メタデータの順に取得する。"""
+    try:
+        adjusted_data = _download_with_retry(
+            tickers=tickers,
+            period=period,
+            group_by=group_by,
+            end=end,
+            auto_adjust=True,
+        )
+        if _has_prices_on_date(adjusted_data, tickers, expected_price_date):
+            return adjusted_data
+        print(
+            f"調整後終値に{expected_price_date}の価格がないため通常終値へ切り替えます"
+        )
+    except MarketDataUnavailableError as adjusted_error:
+        print(f"調整後終値を取得できないため通常終値へ切り替えます: {adjusted_error}")
+
+    try:
+        raw_data = _download_with_retry(
+            tickers=tickers,
+            period=period,
+            group_by=group_by,
+            end=end,
+            auto_adjust=False,
+        )
+        if _has_prices_on_date(raw_data, tickers, expected_price_date):
+            return raw_data
+        # 対象日の行が調整後・通常終値の双方にない場合は休場日として呼び出し元で判定する。
+        return raw_data
+    except MarketDataUnavailableError as raw_error:
+        data = raw_error.data.copy()
+
+    symbols = [tickers] if isinstance(tickers, str) else list(tickers)
+    if _fill_expected_close_from_fast_info(data, symbols, expected_price_date):
+        print("日足終値をYahooのregularMarketPriceで補完しました")
+        return data
+
+    raise MarketDataUnavailableError(
+        f"{tickers}: 調整後終値・通常終値・regularMarketPriceのすべてを取得できませんでした",
+        data,
+    )
+
+
+def _has_prices_on_date(
+    data: pd.DataFrame,
+    tickers: str | Sequence[str],
+    price_date: datetime.date,
+) -> bool:
+    """全銘柄について、指定日の有効な終値が揃っているかを判定する。"""
+    if data.empty:
+        return False
+    symbols = [tickers] if isinstance(tickers, str) else list(tickers)
+    for ticker in symbols:
+        try:
+            close = _close_series(data, ticker if len(symbols) > 1 else None)
+        except KeyError:
+            return False
+        matching_indexes = [
+            index for index in close.index if index.date() == price_date
+        ]
+        if not matching_indexes or not _is_valid_price(close.loc[matching_indexes[-1]]):
+            return False
+    return True
+
+
+def _fill_expected_close_from_fast_info(
+    data: pd.DataFrame,
+    tickers: Sequence[str],
+    expected_price_date: datetime.date,
+) -> bool:
+    """対象日の行が存在する場合だけ、欠損Closeを市場価格メタデータで補完する。"""
+    if data.empty:
+        return False
+    matching_indexes = [
+        index for index in data.index if index.date() == expected_price_date
+    ]
+    if not matching_indexes:
+        return False
+    expected_index = matching_indexes[-1]
+
+    for ticker in tickers:
+        close_series = _close_series(data, ticker if len(tickers) > 1 else None)
+        current_value = close_series.loc[expected_index]
+        if _is_valid_price(current_value):
+            continue
+        last_price = yf.Ticker(ticker).fast_info.last_price
+        if not _is_valid_price(last_price):
+            return False
+        if len(tickers) > 1:
+            data.loc[expected_index, (ticker, "Close")] = float(last_price)
+        else:
+            if isinstance(data.columns, pd.MultiIndex):
+                close_columns = [
+                    column for column in data.columns if column[0] == "Close"
+                ]
+                if not close_columns:
+                    return False
+                data.loc[expected_index, close_columns[0]] = float(last_price)
+            elif "Close" in data.columns:
+                data.loc[expected_index, "Close"] = float(last_price)
+            else:
+                return False
+    validation_tickers: str | Sequence[str] = (
+        tickers[0] if len(tickers) == 1 else tickers
+    )
+    return not _has_nan_values(data, validation_tickers)
+
+
+def _log_latest_prices(
+    data: pd.DataFrame,
+    tickers: str | Sequence[str],
+    attempt: int,
+    auto_adjust: bool,
+) -> None:
+    """欠損原因を追跡できる範囲で、最新日と終値を記録する。"""
+    if data.empty:
+        print(
+            f"yfinance取得結果: attempt={attempt}, auto_adjust={auto_adjust}, empty=True"
+        )
+        return
+    symbols = [tickers] if isinstance(tickers, str) else list(tickers)
+    values: list[str] = []
+    for ticker in symbols:
+        try:
+            close = _close_series(data, ticker if len(symbols) > 1 else None)
+            values.append(f"{ticker}={close.iloc[-1]!r}")
+        except (KeyError, IndexError):
+            values.append(f"{ticker}=missing")
+    latest_index = data.index[-1]
+    latest_date = latest_index.date() if hasattr(latest_index, "date") else latest_index
+    print(
+        "yfinance取得結果: "
+        f"attempt={attempt}, auto_adjust={auto_adjust}, "
+        f"latest_date={latest_date}, close=[{', '.join(values)}]"
+    )
 
 
 def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
@@ -282,7 +446,98 @@ def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
     return False
 
 
-def _is_market_closed(all_data: pd.DataFrame) -> bool:
+def _close_series(data: pd.DataFrame, ticker: str | None = None) -> pd.Series:
+    """単一・複数銘柄のDataFrameからClose列を統一的に取り出す。"""
+    ticker_data = data[ticker] if ticker is not None else data
+    close = ticker_data["Close"]
+    if isinstance(close, pd.DataFrame):
+        close = close.iloc[:, 0]
+    return close
+
+
+def _is_valid_price(value: object) -> bool:
+    try:
+        price = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(price) and price > 0
+
+
+def _price_on_date(data: pd.DataFrame, price_date: datetime.date) -> float:
+    """指定日の有効なCloseを返す。暗黙に別日へフォールバックしない。"""
+    close = _close_series(data)
+    matching_indexes = [index for index in close.index if index.date() == price_date]
+    if not matching_indexes:
+        raise MarketDataUnavailableError(f"{price_date}の終値がありません", data)
+    value = close.loc[matching_indexes[-1]]
+    if not _is_valid_price(value):
+        raise MarketDataUnavailableError(
+            f"{price_date}の終値が不正です: {value!r}", data
+        )
+    return float(value)
+
+
+def _build_ticker_data(
+    data: pd.DataFrame,
+    tickers: Sequence[str],
+    expected_price_date: datetime.date,
+) -> tuple[datetime.date, List[TickerData]]:
+    """基準日、直前取引日、1週間前の取引日を明示して通知値を作る。"""
+    close_by_ticker = {
+        ticker: pd.to_numeric(_close_series(data, ticker), errors="coerce")
+        for ticker in tickers
+    }
+    closes = pd.DataFrame(close_by_ticker).sort_index()
+    closes = closes.replace([float("inf"), float("-inf")], pd.NA)
+    valid_rows = closes.dropna(how="any")
+    valid_rows = valid_rows[(valid_rows > 0).all(axis=1)]
+
+    current_indexes = [
+        index for index in valid_rows.index if index.date() == expected_price_date
+    ]
+    if not current_indexes:
+        raise MarketDataUnavailableError(
+            f"3銘柄が揃った{expected_price_date}の終値がありません", data
+        )
+    current_index = current_indexes[-1]
+
+    previous_rows = valid_rows[valid_rows.index < current_index]
+    if previous_rows.empty:
+        raise MarketDataUnavailableError("前日比の比較日がありません", data)
+    previous_index = previous_rows.index[-1]
+
+    weekly_target = expected_price_date - datetime.timedelta(days=7)
+    weekly_rows = previous_rows[
+        pd.Index([index.date() <= weekly_target for index in previous_rows.index])
+    ]
+    if weekly_rows.empty:
+        raise MarketDataUnavailableError("前週比の比較日がありません", data)
+    weekly_index = weekly_rows.index[-1]
+
+    print(
+        "ETF価格採用日: "
+        f"current={current_index.date()}, previous={previous_index.date()}, "
+        f"weekly={weekly_index.date()}"
+    )
+    ticker_data: List[TickerData] = []
+    for ticker in tickers:
+        current = float(valid_rows.loc[current_index, ticker])
+        previous = float(valid_rows.loc[previous_index, ticker])
+        weekly = float(valid_rows.loc[weekly_index, ticker])
+        ticker_data.append(
+            {
+                "name": ticker,
+                "daily_change": round(((current - previous) / previous) * 100, 2),
+                "weekly_change": round(((current - weekly) / weekly) * 100, 2),
+                "current_price": current,
+            }
+        )
+    return current_index.date(), ticker_data
+
+
+def _is_market_closed(
+    all_data: pd.DataFrame, expected_price_date: datetime.date | None = None
+) -> bool:
     """
     米国市場が休場していたかどうかを判定
 
@@ -293,7 +548,9 @@ def _is_market_closed(all_data: pd.DataFrame) -> bool:
         bool: 市場が休場していたからTrue、そうでなければFalse
     """
     latest_date = all_data.index[-1].date()
-    expected_date = datetime.datetime.now().date() - datetime.timedelta(days=1)
+    expected_date = expected_price_date or (
+        datetime.datetime.now().date() - datetime.timedelta(days=1)
+    )
     return latest_date != expected_date
 
 

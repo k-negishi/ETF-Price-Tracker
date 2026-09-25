@@ -1,7 +1,7 @@
 import os
 import sys
 from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 
 import pandas as pd
 import pytest
@@ -18,7 +18,10 @@ from src.handler import (
     _check_and_notify_all_tickers,
     _format_notification_message,
     _download_with_retry,
+    _download_prices_with_fallback,
+    _build_ticker_data,
     _has_nan_values,
+    MarketDataUnavailableError,
     create_chart,
 )
 from src.s3_storage import CHART_FILENAME
@@ -50,27 +53,33 @@ class TestCalculateDailyChange:
     def test_calculate_daily_change_positive(self):
         """前日比プラスの場合のテスト"""
         # テストデータ作成
-        test_data = pd.DataFrame({
-            'Close': [100.0, 105.0]  # 5%の上昇
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 105.0]  # 5%の上昇
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == 5.0
 
     def test_calculate_daily_change_negative(self):
         """前日比マイナスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 97.0]  # 3%の下落
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 97.0]  # 3%の下落
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == -3.0
 
     def test_calculate_daily_change_no_change(self):
         """前日比変化なしの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 100.0]  # 変化なし
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 100.0]  # 変化なし
+            }
+        )
 
         result = _calculate_daily_change(test_data)
         assert result == 0.0
@@ -81,30 +90,37 @@ class TestCalculateWeeklyChange:
 
     def test_calculate_weekly_change_positive(self):
         """1週間前比プラスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 102.0, 104.0, 103.0, 110.0]  # 10%の上昇
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 102.0, 104.0, 103.0, 110.0]  # 10%の上昇
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == 10.0
 
     def test_calculate_weekly_change_negative(self):
         """1週間前比マイナスの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 98.0, 96.0, 94.0, 90.0]  # 10%の下落
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 98.0, 96.0, 94.0, 90.0]  # 10%の下落
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == -10.0
 
     def test_calculate_weekly_change_no_change(self):
         """1週間前比変化なしの場合のテスト"""
-        test_data = pd.DataFrame({
-            'Close': [100.0, 102.0, 98.0, 105.0, 100.0]  # 変化なし
-        })
+        test_data = pd.DataFrame(
+            {
+                "Close": [100.0, 102.0, 98.0, 105.0, 100.0]  # 変化なし
+            }
+        )
 
         result = _calculate_weekly_change(test_data)
         assert result == 0.0
+
 
 class TestCheckAndNotifyAllTickers:
     """check_and_notify_all_tickers関数のテストクラス"""
@@ -113,17 +129,17 @@ class TestCheckAndNotifyAllTickers:
         """アラートが不要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -3.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -3.0,  # 閾値内
+                "current_price": 100.0,
             },
             {
-                'name': 'VOO',
-                'daily_change': 1.0,   # プラス
-                'weekly_change': -2.0,  # 閾値内
-                'current_price': 200.0
-            }
+                "name": "VOO",
+                "daily_change": 1.0,  # プラス
+                "weekly_change": -2.0,  # 閾値内
+                "current_price": 200.0,
+            },
         ]
 
         result = _check_and_notify_all_tickers(ticker_data, -2.0, -5.0)
@@ -133,10 +149,10 @@ class TestCheckAndNotifyAllTickers:
         """日次アラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -1.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -1.0,  # 閾値内
+                "current_price": 100.0,
             }
         ]
 
@@ -147,10 +163,10 @@ class TestCheckAndNotifyAllTickers:
         """週次アラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'VOO',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -6.0,  # 閾値を下回る
-                'current_price': 200.0
+                "name": "VOO",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -6.0,  # 閾値を下回る
+                "current_price": 200.0,
             }
         ]
 
@@ -161,10 +177,10 @@ class TestCheckAndNotifyAllTickers:
         """両方のアラートが必要な場合のテスト"""
         ticker_data = [
             {
-                'name': 'QQQ',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -7.0,  # 閾値を下回る
-                'current_price': 300.0
+                "name": "QQQ",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -7.0,  # 閾値を下回る
+                "current_price": 300.0,
             }
         ]
 
@@ -175,27 +191,28 @@ class TestCheckAndNotifyAllTickers:
         """複数銘柄で一部がアラート対象の場合のテスト"""
         ticker_data = [
             {
-                'name': 'VT',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -3.0,  # 閾値内
-                'current_price': 100.0
+                "name": "VT",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -3.0,  # 閾値内
+                "current_price": 100.0,
             },
             {
-                'name': 'VOO',
-                'daily_change': -3.0,  # 閾値を下回る
-                'weekly_change': -2.0,  # 閾値内
-                'current_price': 200.0
+                "name": "VOO",
+                "daily_change": -3.0,  # 閾値を下回る
+                "weekly_change": -2.0,  # 閾値内
+                "current_price": 200.0,
             },
             {
-                'name': 'QQQ',
-                'daily_change': -1.0,  # 閾値内
-                'weekly_change': -6.0,  # 閾値を下回る
-                'current_price': 300.0
-            }
+                "name": "QQQ",
+                "daily_change": -1.0,  # 閾値内
+                "weekly_change": -6.0,  # 閾値を下回る
+                "current_price": 300.0,
+            },
         ]
 
         result = _check_and_notify_all_tickers(ticker_data, -2.0, -5.0)
         assert result is True
+
 
 class TestFormatNotificationMessage:
     """format_notification_message関数のテストクラス"""
@@ -253,9 +270,10 @@ class TestCreateChartFilename:
     @patch("matplotlib.pyplot.close")
     def test_create_chart_uses_constant_filename(self, mock_close, mock_savefig):
         """create_chart関数がCHART_FILENAME定数を使用することを確認"""
-        test_data = pd.DataFrame({
-            "Close": [100.0 + i for i in range(30)]
-        }, index=pd.date_range("2025-12-01", periods=30))
+        test_data = pd.DataFrame(
+            {"Close": [100.0 + i for i in range(30)]},
+            index=pd.date_range("2025-12-01", periods=30),
+        )
 
         filepath = create_chart(test_data)
 
@@ -277,8 +295,12 @@ class TestDownloadWithRetry:
         data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
         data_without_nan = pd.DataFrame({"Close": [100.0, 101.0]})
 
-        with patch("src.handler.yf.download", side_effect=[data_with_nan, data_without_nan]) as mock_download, \
-            patch("src.handler.time.sleep") as mock_sleep:
+        with (
+            patch(
+                "src.handler.yf.download", side_effect=[data_with_nan, data_without_nan]
+            ) as mock_download,
+            patch("src.handler.time.sleep") as mock_sleep,
+        ):
             result = _download_with_retry(
                 tickers="VT",
                 period="1mo",
@@ -290,6 +312,134 @@ class TestDownloadWithRetry:
         assert result.equals(data_without_nan)
         assert mock_download.call_count == 2
         mock_sleep.assert_called_once_with(1)
+
+    def test_download_with_retry_raises_after_all_attempts_fail(self):
+        """欠損した最終結果を後段へ流さないことを確認"""
+        data_with_nan = pd.DataFrame({"Close": [100.0, float("nan")]})
+
+        with (
+            patch("src.handler.yf.download", return_value=data_with_nan),
+            patch("src.handler.time.sleep"),
+        ):
+            with pytest.raises(MarketDataUnavailableError):
+                _download_with_retry(
+                    tickers="VT",
+                    period="1mo",
+                    max_attempts=2,
+                    retry_interval_seconds=0,
+                )
+
+    def test_download_falls_back_to_unadjusted_close(self):
+        """調整後終値が欠損した場合に通常終値を採用することを確認"""
+        index = pd.to_datetime(["2026-09-23", "2026-09-24"])
+        adjusted = pd.DataFrame({"Close": [100.0, float("nan")]}, index=index)
+        raw = pd.DataFrame({"Close": [100.0, 101.0]}, index=index)
+
+        with (
+            patch(
+                "src.handler.yf.download",
+                side_effect=[adjusted, adjusted, adjusted, raw],
+            ),
+            patch("src.handler.time.sleep"),
+        ):
+            result = _download_prices_with_fallback(
+                tickers="VT",
+                period="1mo",
+                end=datetime(2026, 9, 25).date(),
+                expected_price_date=datetime(2026, 9, 24).date(),
+            )
+
+        assert result["Close"].iloc[-1] == 101.0
+
+    def test_download_falls_back_when_adjusted_data_lacks_expected_date(self):
+        """調整後終値に基準日がない場合も通常終値を試すことを確認"""
+        adjusted = pd.DataFrame(
+            {"Close": [100.0]}, index=pd.to_datetime(["2026-09-23"])
+        )
+        raw = pd.DataFrame(
+            {"Close": [100.0, 101.0]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+
+        with patch("src.handler.yf.download", side_effect=[adjusted, raw]):
+            result = _download_prices_with_fallback(
+                tickers="VT",
+                period="1mo",
+                end=datetime(2026, 9, 25).date(),
+                expected_price_date=datetime(2026, 9, 24).date(),
+            )
+
+        assert result["Close"].iloc[-1] == 101.0
+
+    def test_download_fills_missing_close_from_fast_info(self):
+        """日足の行だけ先に生成された場合は市場価格メタデータで補完する"""
+        index = pd.to_datetime(["2026-09-23", "2026-09-24"])
+        missing = pd.DataFrame({"Close": [100.0, float("nan")]}, index=index)
+        ticker = Mock()
+        ticker.fast_info.last_price = 101.0
+
+        with (
+            patch("src.handler.yf.download", return_value=missing),
+            patch("src.handler.yf.Ticker", return_value=ticker),
+            patch("src.handler.time.sleep"),
+        ):
+            result = _download_prices_with_fallback(
+                tickers="VT",
+                period="1mo",
+                end=datetime(2026, 9, 25).date(),
+                expected_price_date=datetime(2026, 9, 24).date(),
+            )
+
+        assert result["Close"].iloc[-1] == 101.0
+
+
+class TestBuildTickerData:
+    def test_uses_explicit_current_previous_and_weekly_dates(self):
+        """3銘柄で共通する日付を基準に変動率を計算することを確認"""
+        index = pd.to_datetime(["2026-09-16", "2026-09-17", "2026-09-23", "2026-09-24"])
+        combined = pd.concat(
+            {
+                "VT": pd.DataFrame(
+                    {"Close": [100.0, 101.0, 109.0, 110.0]}, index=index
+                ),
+                "VOO": pd.DataFrame(
+                    {"Close": [200.0, 202.0, 218.0, 220.0]}, index=index
+                ),
+                "QQQ": pd.DataFrame(
+                    {"Close": [300.0, 303.0, 327.0, 330.0]}, index=index
+                ),
+            },
+            axis=1,
+        )
+
+        price_date, ticker_data = _build_ticker_data(
+            combined, ("VT", "VOO", "QQQ"), datetime(2026, 9, 24).date()
+        )
+
+        assert price_date == datetime(2026, 9, 24).date()
+        assert ticker_data[0] == {
+            "name": "VT",
+            "daily_change": 0.92,
+            "weekly_change": 8.91,
+            "current_price": 110.0,
+        }
+
+    def test_rejects_missing_expected_date_instead_of_using_older_price(self):
+        """基準日の欠損を過去日の価格で暗黙補完しないことを確認"""
+        index = pd.to_datetime(["2026-09-23", "2026-09-24"])
+        combined = pd.concat(
+            {
+                "VT": pd.DataFrame({"Close": [100.0, float("nan")]}, index=index),
+                "VOO": pd.DataFrame({"Close": [200.0, 201.0]}, index=index),
+                "QQQ": pd.DataFrame({"Close": [300.0, 301.0]}, index=index),
+            },
+            axis=1,
+        )
+
+        with pytest.raises(MarketDataUnavailableError):
+            _build_ticker_data(
+                combined, ("VT", "VOO", "QQQ"), datetime(2026, 9, 24).date()
+            )
 
 
 class TestHasNanValues:
@@ -356,7 +506,9 @@ class TestS3ImageIntegration:
         # テストケース
         storage = S3Storage()
         url = storage.upload_and_get_url(
-            filepath="/tmp/vt_chart.png", filename_hint=CHART_FILENAME, now=datetime.now()
+            filepath="/tmp/vt_chart.png",
+            filename_hint=CHART_FILENAME,
+            now=datetime.now(),
         )
 
         assert url is not None
