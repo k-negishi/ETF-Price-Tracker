@@ -3,6 +3,8 @@ name: Deploy ETF Price Tracker
 on:
   push:
     branches: [ main ]
+  pull_request:
+    branches: [ main ]
   workflow_dispatch:
 
 env:
@@ -92,6 +94,7 @@ jobs:
         run: python -m pytest tests/ -v
 
   deploy:
+    if: github.event_name != 'pull_request'
     needs: [lint, format, type-check, test]
     runs-on: ubuntu-latest
     steps:
