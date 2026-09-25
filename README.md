@@ -42,22 +42,32 @@ AWS Lambda
 
 ### 処理フロー
 
-1. **EventBridge スケジュール起動**  
-   毎日火〜土曜日の午前9時（JST）にLambda関数を実行
+1. **EventBridge スケジュール起動**
 
-2. **データ取得**  
-   yfinanceを使用してETF価格とUSD/JPY為替レートを取得
+   毎週火〜土曜日の午前9時15分（JST）にLambda関数を実行（UTC 0:15、NY夏時間は前日20:15、NY冬時間は前日19:15）
 
-3. **チャート生成**  
+2. **データ取得**
+
+   yfinanceを使用し、3つのETFとUSD/JPY為替レートを別々に取得。ETFは調整後終値、通常終値、`fast_info.last_price`の順でフォールバック
+
+3. **価格検証・変動率計算**
+
+   VT・VOO・QQQの3銘柄すべてについて基準日の価格が揃った場合だけ、同じ取引日を使って現在値・前日比・前週比を計算。通知見出しにはETF価格の基準日を表示し、値が揃わない場合は`NaN`を通知せず処理を終了
+
+4. **チャート生成**
+
    matplotlibでVTの6ヶ月チャートを生成し、`/tmp/vt_chart.png`に保存
 
-4. **S3アップロード**  
+5. **S3アップロード**
+
    boto3を使用してチャート画像をS3にアップロード
 
-5. **Presigned URL生成**  
+6. **Presigned URL生成**
+
    S3から有効期限付きのpresigned URL（GET）を取得
 
-6. **LINE Push API送信**  
+7. **LINE Push API送信**
+
    テキストと画像でETF価格とチャートを送信
 
 ### 使用技術
@@ -67,7 +77,7 @@ AWS Lambda
 - AWS EventBridge
 - AWS S3
 - AWS SAM
-- yfinance
+- yfinance 0.2.65
 - matplotlib
 - LINE Messaging API
 
@@ -193,7 +203,7 @@ GitHub Actions と AWS SAM を使用したサーバーレスアプリケーシ�
 ### Overview
 
 This application monitors the prices of popular ETFs (VT, VOO, QQQ) and the USD/JPY exchange rate, and sends daily price change notifications to LINE in text format.
-It also includes a feature to send a 3-month price chart for VT as an image.
+It also includes a feature to send a 6-month price chart for VT as an image.
 
 ### Architecture
 
@@ -213,21 +223,24 @@ AWS Lambda
 ### Processing Flow
 
 1. **EventBridge Schedule Trigger**
-   Executes the Lambda function every day from Tuesday to Saturday at 9:00 AM (JST).
+   Executes the Lambda function every Tuesday through Saturday at 9:15 AM JST (00:15 UTC, 8:15 PM on the previous day in New York during daylight saving time, and 7:15 PM during standard time).
 
 2. **Data Retrieval**
-   Retrieves ETF prices and the USD/JPY exchange rate using yfinance.
+   Retrieves the three ETFs separately from the USD/JPY exchange rate using yfinance. ETF retrieval falls back from adjusted close to unadjusted close and then to `fast_info.last_price`.
 
-3. **Chart Generation**
+3. **Price Validation and Change Calculation**
+   Calculates the current price, day-over-day change, and week-over-week change from common trading dates only when all three ETFs have a valid price for the target date. The notification heading shows the ETF price date; if the values are incomplete, the function exits without sending `NaN`.
+
+4. **Chart Generation**
    Generates a 6-month price chart for VT using matplotlib and saves it to `/tmp/vt_chart.png`.
 
-4. **S3 Upload**
+5. **S3 Upload**
    Uploads the chart image to Amazon S3 using boto3.
 
-5. **Presigned URL Generation**
+6. **Presigned URL Generation**
    Generates a presigned URL (GET) with an expiration time.
 
-6. **LINE Push API Notification**
+7. **LINE Push API Notification**
    Sends ETF price information and the chart via text and image messages using the LINE Messaging API.
 
 ### Technologies Used
@@ -237,7 +250,7 @@ AWS Lambda
 * AWS EventBridge
 * AWS S3
 * AWS SAM
-* yfinance
+* yfinance 0.2.65
 * matplotlib
 * LINE Messaging API
 
