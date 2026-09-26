@@ -1,4 +1,6 @@
 import datetime
+import io
+import logging
 import math
 import os
 import time
@@ -261,6 +263,7 @@ def _download_with_retry(
             )
             time.sleep(retry_interval_seconds)
 
+    _log_yfinance_diagnostics(download_kwargs)
     raise MarketDataUnavailableError(
         f"{tickers}: {max_attempts}回試行後も最新終値を取得できませんでした "
         f"(auto_adjust={auto_adjust})",
@@ -517,8 +520,13 @@ def _log_latest_prices(
     values: list[str] = []
     for ticker in symbols:
         try:
-            close = _close_series(data, ticker if len(symbols) > 1 else None)
-            values.append(f"{ticker}={close.iloc[-1]!r}")
+            ticker_data = _ticker_frame(data, ticker, multiple=len(symbols) > 1)
+            latest = ticker_data.iloc[-1]
+            fields = {
+                field: _scalar_value(latest.get(field, "missing"))
+                for field in ("Open", "High", "Low", "Close", "Volume")
+            }
+            values.append(f"{ticker}={fields}")
         except (KeyError, IndexError):
             values.append(f"{ticker}=missing")
     latest_index = data.index[-1]
@@ -526,8 +534,72 @@ def _log_latest_prices(
     print(
         "yfinance取得結果: "
         f"attempt={attempt}, auto_adjust={auto_adjust}, "
-        f"latest_date={latest_date}, close=[{', '.join(values)}]"
+        f"version={getattr(yf, '__version__', 'unknown')}, "
+        f"shape={data.shape}, columns={list(data.columns)}, "
+        f"latest_date={latest_date}, ohlcv=[{', '.join(values)}]"
     )
+
+
+def _log_yfinance_diagnostics(download_kwargs: Dict[str, Any]) -> None:
+    """最終失敗時だけyfinanceの内部診断ログをCloudWatchへ残す。"""
+    config = getattr(yf, "config", None)
+    debug = getattr(config, "debug", None)
+    if debug is None:
+        print("yfinance診断: debug設定が利用できません")
+        return
+
+    logger = logging.getLogger("yfinance")
+    buffer = io.StringIO()
+    handler = logging.StreamHandler(buffer)
+    previous_level = logger.level
+    previous_propagate = logger.propagate
+    previous_logging = getattr(debug, "logging", False)
+    previous_hide_exceptions = getattr(debug, "hide_exceptions", True)
+    logger.addHandler(handler)
+    logger.setLevel(logging.DEBUG)
+    logger.propagate = False
+    try:
+        debug.logging = True
+        debug.hide_exceptions = False
+        try:
+            yf.download(**download_kwargs, progress=False)
+        except Exception as error:
+            print(
+                "yfinance診断取得例外: "
+                f"error_type={type(error).__name__}, error={error}"
+            )
+    finally:
+        debug.logging = previous_logging
+        debug.hide_exceptions = previous_hide_exceptions
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+        logger.propagate = previous_propagate
+
+    diagnostic_log = buffer.getvalue().strip()
+    if diagnostic_log:
+        print(f"yfinance診断ログ:\n{diagnostic_log[-6000:]}")
+    else:
+        print("yfinance診断ログ: yfinanceから追加ログなし")
+
+
+def _ticker_frame(data: pd.DataFrame, ticker: str, *, multiple: bool) -> pd.DataFrame:
+    """取得結果の列構造に依存せず、ティッカー単位のDataFrameを返す。"""
+    if not isinstance(data.columns, pd.MultiIndex):
+        return data
+    if multiple and ticker in data.columns.get_level_values(0):
+        return data[ticker]
+    if ticker in data.columns.get_level_values(1):
+        return data.xs(ticker, axis=1, level=1)
+    if ticker in data.columns.get_level_values(0):
+        return data[ticker]
+    raise KeyError(ticker)
+
+
+def _scalar_value(value: object) -> object:
+    """ログ向けにSeries等を単一値へ縮約する。"""
+    if isinstance(value, pd.Series):
+        return value.iloc[0] if not value.empty else "missing"
+    return value
 
 
 def _has_nan_values(data: pd.DataFrame, tickers: str | Sequence[str]) -> bool:
