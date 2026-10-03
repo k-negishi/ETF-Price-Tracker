@@ -2,9 +2,11 @@ import datetime
 import io
 import logging
 import math
+import numbers
 import os
 import time
 from typing import Any, Dict, List, Sequence, TypedDict
+from zoneinfo import ZoneInfo
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
@@ -417,9 +419,11 @@ def _download_individual_histories(
     histories: dict[str, pd.DataFrame] = {}
     for ticker in tickers:
         last_data = pd.DataFrame()
+        ticker_client: yf.Ticker | None = None
         for attempt in range(1, max_attempts + 1):
             try:
-                last_data = yf.Ticker(ticker).history(
+                ticker_client = yf.Ticker(ticker)
+                last_data = ticker_client.history(
                     period=period,
                     end=end,
                     auto_adjust=False,
@@ -454,15 +458,218 @@ def _download_individual_histories(
                 )
                 time.sleep(retry_interval_seconds)
         else:
-            raise MarketDataUnavailableError(
-                f"{ticker}: {expected_price_date}の通常日足を"
-                f"{max_attempts}回試行しても取得できませんでした",
-                last_data,
+            filled_data = _fill_close_from_verified_quote(
+                ticker_client=ticker_client,
+                frame=last_data,
+                symbol=ticker,
+                expected_price_date=expected_price_date,
             )
+            if filled_data is None:
+                raise MarketDataUnavailableError(
+                    f"{ticker}: {expected_price_date}の通常日足を"
+                    f"{max_attempts}回試行しても取得できませんでした",
+                    last_data,
+                )
+            histories[ticker] = filled_data
 
     if len(tickers) == 1:
         return histories[tickers[0]]
     return pd.concat(histories, axis=1)
+
+
+def _fill_close_from_verified_quote(
+    *,
+    ticker_client: yf.Ticker | None,
+    frame: pd.DataFrame,
+    symbol: str,
+    expected_price_date: datetime.date,
+) -> pd.DataFrame | None:
+    """基準日の終値が日足に無いとき、日付を検証したうえで別経路から補完する。
+
+    日足の終値が未確定でも、chart meta や1分足には引け値が入っていることがある。
+    ただし日付を検証できない値は採用しない（誤った日付の値を通知しないため）。
+    """
+    if ticker_client is None:
+        print(f"終値補完不可: symbol={symbol}, reason=ticker_client_unavailable")
+        return None
+
+    price = _verified_meta_close(ticker_client, symbol, expected_price_date)
+    source = "meta_quote"
+    if price is None:
+        price = _verified_intraday_close(ticker_client, symbol, expected_price_date)
+        source = "intraday_1m"
+    if price is None:
+        return None
+
+    filled = _set_close_on_date(frame, expected_price_date, price)
+    if not _has_prices_on_date(filled, symbol, expected_price_date):
+        print(f"終値補完不可: source={source}, symbol={symbol}, reason=fill_failed")
+        return None
+    _log_price_date_result(
+        filled,
+        symbol,
+        expected_price_date,
+        source=source,
+        accepted=True,
+    )
+    print(
+        f"終値補完: source={source}, symbol={symbol}, "
+        f"expected_date={expected_price_date}, close={price}"
+    )
+    return filled
+
+
+def _verified_meta_close(
+    ticker_client: yf.Ticker,
+    symbol: str,
+    expected_price_date: datetime.date,
+) -> float | None:
+    """chart meta の regularMarketPrice を、基準日と一致する場合だけ採用する。"""
+    try:
+        metadata = ticker_client.history_metadata
+    except Exception as error:
+        print(
+            "終値補完不可: "
+            f"source=meta_quote, symbol={symbol}, reason=metadata_error, "
+            f"error_type={type(error).__name__}, error={error}"
+        )
+        return None
+    if not isinstance(metadata, dict):
+        print(
+            f"終値補完不可: source=meta_quote, symbol={symbol}, "
+            "reason=metadata_unavailable"
+        )
+        return None
+
+    quote_date = _meta_quote_date(metadata)
+    if quote_date != expected_price_date:
+        print(
+            "終値補完不可: "
+            f"source=meta_quote, symbol={symbol}, "
+            f"expected_date={expected_price_date}, quote_date={quote_date}, "
+            "reason=date_mismatch"
+        )
+        return None
+
+    price = metadata.get("regularMarketPrice")
+    if not _is_valid_price(price):
+        print(
+            "終値補完不可: "
+            f"source=meta_quote, symbol={symbol}, reason=invalid_price, "
+            f"regularMarketPrice={price!r}"
+        )
+        return None
+    return float(price)  # type: ignore[arg-type]
+
+
+def _meta_quote_date(metadata: Dict[str, Any]) -> datetime.date | None:
+    """meta の regularMarketTime を取引所タイムゾーンの日付へ変換する。
+
+    yfinance は meta をそのまま返す場合（epoch秒）と整形済みの場合
+    （取引所タイムゾーンの Timestamp）があるため、両方を受け付ける。
+    数値は numpy のスカラー型もありうるため numbers.Real で判定する。
+    """
+    raw_time = metadata.get("regularMarketTime")
+    tz_name = metadata.get("exchangeTimezoneName")
+    if not isinstance(tz_name, str) or not tz_name:
+        return None
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        return None
+
+    if isinstance(raw_time, pd.Timestamp):
+        moment = raw_time.to_pydatetime()
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=datetime.timezone.utc)
+    elif isinstance(raw_time, numbers.Real) and not isinstance(raw_time, bool):
+        moment = datetime.datetime.fromtimestamp(
+            float(raw_time), tz=datetime.timezone.utc
+        )
+    else:
+        return None
+
+    return moment.astimezone(tz).date()
+
+
+def _verified_intraday_close(
+    ticker_client: yf.Ticker,
+    symbol: str,
+    expected_price_date: datetime.date,
+) -> float | None:
+    """1分足の最終バーを、その時刻が基準日と一致する場合だけ採用する。
+
+    prepost=False を明示し、時間外ではなく通常取引時間の最終バー（引け値）を使う。
+    """
+    try:
+        intraday = ticker_client.history(
+            period="1d",
+            interval="1m",
+            auto_adjust=False,
+            actions=False,
+            prepost=False,
+            raise_errors=True,
+        )
+    except Exception as error:
+        print(
+            "終値補完不可: "
+            f"source=intraday_1m, symbol={symbol}, reason=history_error, "
+            f"error_type={type(error).__name__}, error={error}"
+        )
+        return None
+    if intraday is None or intraday.empty:
+        print(f"終値補完不可: source=intraday_1m, symbol={symbol}, reason=empty")
+        return None
+
+    bar_index = intraday.index[-1]
+    bar_date = bar_index.date() if hasattr(bar_index, "date") else None
+    if bar_date != expected_price_date:
+        print(
+            "終値補完不可: "
+            f"source=intraday_1m, symbol={symbol}, "
+            f"expected_date={expected_price_date}, bar_date={bar_date}, "
+            "reason=date_mismatch"
+        )
+        return None
+
+    try:
+        close = _close_series(intraday)
+    except KeyError:
+        print(
+            f"終値補完不可: source=intraday_1m, symbol={symbol}, reason=missing_close"
+        )
+        return None
+
+    value = close.iloc[-1]
+    if not _is_valid_price(value):
+        print(
+            "終値補完不可: "
+            f"source=intraday_1m, symbol={symbol}, reason=invalid_price, "
+            f"close={value!r}"
+        )
+        return None
+    return float(value)
+
+
+def _set_close_on_date(
+    frame: pd.DataFrame,
+    price_date: datetime.date,
+    price: float,
+) -> pd.DataFrame:
+    """基準日の終値をフレームに設定する（行が無ければ追加する）。"""
+    data = frame.copy()
+    matching = [index for index in data.index if index.date() == price_date]
+    if matching:
+        data.loc[matching[-1], "Close"] = price
+        return data
+
+    stamp = pd.Timestamp(price_date)
+    index_tz = getattr(data.index, "tz", None)
+    if index_tz is not None:
+        stamp = stamp.tz_localize(index_tz)
+    data = data.reindex(data.index.append(pd.DatetimeIndex([stamp])))
+    data.loc[stamp, "Close"] = price
+    return data.sort_index()
 
 
 def _log_price_date_result(
