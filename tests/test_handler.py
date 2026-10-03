@@ -1,6 +1,6 @@
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -21,6 +21,8 @@ from src.handler import (
     _download_prices_with_fallback,
     _build_ticker_data,
     _has_nan_values,
+    _fill_close_from_verified_quote,
+    _set_close_on_date,
     MarketDataUnavailableError,
     create_chart,
 )
@@ -451,7 +453,14 @@ class TestDownloadWithRetry:
                     expected_price_date=datetime(2026, 9, 24).date(),
                 )
 
-        assert ticker.history.call_count == 3
+        daily_calls = [
+            call
+            for call in ticker.history.call_args_list
+            if "interval" not in call.kwargs
+        ]
+        assert len(daily_calls) == 3
+        # 日足で基準日が取れない場合は1分足での補完も試みる（日付不一致で不採用）
+        assert ticker.history.call_args_list[-1].kwargs["interval"] == "1m"
 
     def test_individual_fallback_returns_common_dated_multi_ticker_data(self):
         """3銘柄の個別日足が揃った場合だけ共通形式で返すことを確認"""
@@ -492,6 +501,216 @@ class TestDownloadWithRetry:
         )
         assert price_date == datetime(2026, 9, 24).date()
         assert [item["current_price"] for item in ticker_data] == [110.0, 220.0, 330.0]
+
+
+class TestVerifiedQuoteFill:
+    """未確定終値の日付検証つき補完のテストクラス"""
+
+    @staticmethod
+    def _build_ticker(history_result, metadata):
+        ticker = Mock()
+        ticker.history.return_value = history_result
+        ticker.history_metadata = metadata
+        return ticker
+
+    @staticmethod
+    def _metadata_for_2026_09_24(price):
+        """2026-09-24 16:00 ET（= 20:00 UTC）を指す meta を返す"""
+        return {
+            "exchangeTimezoneName": "America/New_York",
+            "regularMarketTime": int(
+                datetime(2026, 9, 24, 20, 0, tzinfo=timezone.utc).timestamp()
+            ),
+            "regularMarketPrice": price,
+        }
+
+    def test_fills_close_from_verified_metadata(self, capsys):
+        """meta の日付が基準日と一致する場合に終値を補完することを確認"""
+        frame = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        ticker = self._build_ticker(frame, self._metadata_for_2026_09_24(101.5))
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is not None
+        assert result["Close"].iloc[-1] == 101.5
+        # meta は直前の日足リクエストに含まれるため追加リクエストは不要
+        assert ticker.history.call_count == 0
+        captured = capsys.readouterr().out
+        assert "市場データ採用: source=meta_quote" in captured
+        assert "expected_date=2026-09-24" in captured
+
+    def test_accepts_formatted_timestamp_metadata(self):
+        """meta が取引所タイムゾーンの Timestamp でも日付を検証することを確認"""
+        frame = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        ticker = self._build_ticker(
+            frame,
+            {
+                "exchangeTimezoneName": "America/New_York",
+                "regularMarketTime": pd.Timestamp(
+                    "2026-09-24 16:00", tz="America/New_York"
+                ),
+                "regularMarketPrice": 101.5,
+            },
+        )
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is not None
+        assert result["Close"].iloc[-1] == 101.5
+
+    def test_rejects_metadata_quote_for_a_different_date(self, capsys):
+        """meta の日付が基準日と異なる場合は採用しないことを確認"""
+        frame = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        metadata = {
+            "exchangeTimezoneName": "America/New_York",
+            "regularMarketTime": int(
+                datetime(2026, 9, 23, 20, 0, tzinfo=timezone.utc).timestamp()
+            ),
+            "regularMarketPrice": 100.5,
+        }
+        ticker = self._build_ticker(frame, metadata)
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is None
+        captured = capsys.readouterr().out
+        assert "source=meta_quote" in captured
+        assert "quote_date=2026-09-23" in captured
+        assert "reason=date_mismatch" in captured
+
+    def test_rejects_invalid_metadata_price(self, capsys):
+        """meta の価格が不正な場合は採用しないことを確認"""
+        frame = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        ticker = self._build_ticker(frame, self._metadata_for_2026_09_24(None))
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is None
+        captured = capsys.readouterr().out
+        assert "source=meta_quote" in captured
+        assert "reason=invalid_price" in captured
+
+    def test_falls_back_to_intraday_when_metadata_is_unavailable(self, capsys):
+        """meta が取得できない場合は1分足の最終バーで補完することを確認"""
+        frame = pd.DataFrame({"Close": [100.0]}, index=pd.to_datetime(["2026-09-23"]))
+        intraday = pd.DataFrame(
+            {"Close": [101.25]},
+            index=pd.DatetimeIndex(["2026-09-24 15:59:00-04:00"]),
+        )
+        ticker = self._build_ticker(intraday, "unavailable")
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is not None
+        assert result.loc[pd.Timestamp("2026-09-24"), "Close"] == 101.25
+        ticker.history.assert_called_once_with(
+            period="1d",
+            interval="1m",
+            auto_adjust=False,
+            actions=False,
+            prepost=False,
+            raise_errors=True,
+        )
+        captured = capsys.readouterr().out
+        assert "市場データ採用: source=intraday_1m" in captured
+        assert "終値補完: source=intraday_1m" in captured
+
+    def test_rejects_intraday_bar_for_a_different_date(self, capsys):
+        """1分足の最終バーが基準日でない場合は採用しないことを確認"""
+        frame = pd.DataFrame({"Close": [100.0]}, index=pd.to_datetime(["2026-09-23"]))
+        intraday = pd.DataFrame(
+            {"Close": [101.25]},
+            index=pd.DatetimeIndex(["2026-09-22 15:59:00-04:00"]),
+        )
+        ticker = self._build_ticker(intraday, None)
+
+        result = _fill_close_from_verified_quote(
+            ticker_client=ticker,
+            frame=frame,
+            symbol="VT",
+            expected_price_date=datetime(2026, 9, 24).date(),
+        )
+
+        assert result is None
+        captured = capsys.readouterr().out
+        assert "source=intraday_1m" in captured
+        assert "bar_date=2026-09-22" in captured
+        assert "reason=date_mismatch" in captured
+
+    def test_set_close_on_date_appends_missing_row(self):
+        """基準日の行が無い場合は行を追加して終値を設定することを確認"""
+        frame = pd.DataFrame(
+            {"Close": [100.0], "Volume": [1000]},
+            index=pd.to_datetime(["2026-09-23"]),
+        )
+
+        result = _set_close_on_date(frame, datetime(2026, 9, 24).date(), 101.0)
+
+        assert len(result) == 2
+        assert result.loc[pd.Timestamp("2026-09-24"), "Close"] == 101.0
+        assert pd.isna(result.loc[pd.Timestamp("2026-09-24"), "Volume"])
+
+    def test_download_falls_back_to_verified_metadata_close(self, capsys):
+        """一括取得も個別日足も基準日を欠く場合に meta で補完することを確認"""
+        missing = pd.DataFrame(
+            {"Close": [100.0, float("nan")]},
+            index=pd.to_datetime(["2026-09-23", "2026-09-24"]),
+        )
+        older = pd.DataFrame({"Close": [100.0]}, index=pd.to_datetime(["2026-09-23"]))
+        ticker = self._build_ticker(older, self._metadata_for_2026_09_24(101.5))
+
+        with (
+            patch("src.handler.yf.download", return_value=missing),
+            patch("src.handler.yf.Ticker", return_value=ticker),
+            patch("src.handler.time.sleep"),
+        ):
+            result = _download_prices_with_fallback(
+                tickers="VT",
+                period="1mo",
+                end=datetime(2026, 9, 25).date(),
+                expected_price_date=datetime(2026, 9, 24).date(),
+            )
+
+        assert result["Close"].iloc[-1] == 101.5
+        captured = capsys.readouterr().out
+        assert "市場データ採用: source=meta_quote" in captured
 
 
 class TestBuildTickerData:
